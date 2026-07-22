@@ -5,8 +5,9 @@ import sys
 from typing import Annotated, Optional
 import typer
 
-from db_governance.config import load_profile
+from db_governance.ddl_manage import create_migration_file, get_next_migration_version
 from db_governance.dictionary import load_dictionary, validate_dictionary_standards
+from db_governance.diff import build_effective_schema, compare_table_specs, render_diff_text
 from db_governance.discovery import discover_artifacts
 from db_governance.edit_spec import (
     add_column_to_doc,
@@ -608,6 +609,40 @@ def edit_spec_remove_column(
         sys.exit(0)
     except Exception as exc:
         _handle_error(exc)
+
+
+@app.command()
+def diff(
+    table: Annotated[str, typer.Option("--table", "-t", help="Target table name for 1:1 schema diff")],
+    project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
+    profile: Annotated[Optional[Path], typer.Option("--profile", help="Explicit profile path")] = None,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format (text|json)")] = "text",
+) -> None:
+    """Compares table markdown specification 1:1 against effective DDL schema chain."""
+    try:
+        resolved_root = project.resolve()
+        _, prof, _ = load_profile(resolved_root, profile)
+        artifacts = discover_artifacts(resolved_root, prof)
+
+        tables = parse_project_tables(resolved_root, artifacts)
+        doc_table = next((t for t in tables if t.name.upper() == table.upper()), None)
+        if not doc_table:
+            raise GovernanceError(f"[DBG003] Table document for '{table}' not found.", exit_code=2)
+
+        ddl_table = build_effective_schema(resolved_root, prof, table)
+        findings = compare_table_specs(doc_table, ddl_table)
+
+        if format.lower() == "json":
+            import json
+
+            print(json.dumps([f.model_dump() for f in findings], indent=2))
+        else:
+            print(render_diff_text(table, findings))
+
+        sys.exit(1 if any(f.severity == Severity.ERROR for f in findings) else 0)
+    except Exception as exc:
+        _handle_error(exc)
+
 
 
 

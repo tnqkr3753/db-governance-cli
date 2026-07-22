@@ -10,6 +10,7 @@ from db_governance.discovery import discover_artifacts
 from db_governance.errors import GovernanceError
 from db_governance.git_changes import resolve_changed_files
 from db_governance.models import AuditReport, ChangeType, Finding, Severity
+from db_governance.render import parse_project_tables, render_dbml, render_mermaid_erd
 from db_governance.report import render_json, render_text, write_evidence
 from db_governance.rules import evaluate_required_artifacts, evaluate_rules
 from db_governance.runner import run_validators
@@ -304,4 +305,39 @@ def install_skill(
         sys.exit(0)
     except Exception as exc:
         _handle_error(exc)
+
+
+@app.command()
+def render(
+    project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
+    profile: Annotated[Optional[Path], typer.Option("--profile", help="Explicit profile path")] = None,
+    format: Annotated[str, typer.Option("--format", "-f", help="Diagram format (mermaid|dbml)")] = "mermaid",
+    output: Annotated[Optional[Path], typer.Option("--output", "-o", help="Output file path")] = None,
+) -> None:
+    """Renders Mermaid ERD or DBML diagram from discovered table specifications."""
+    try:
+        resolved_root = project.resolve()
+        _, prof, _ = load_profile(resolved_root, profile)
+        artifacts = discover_artifacts(resolved_root, prof)
+
+        tables = parse_project_tables(resolved_root, artifacts)
+
+        fmt_lower = format.lower()
+        if fmt_lower == "dbml":
+            rendered = render_dbml(tables)
+        else:
+            rendered = render_mermaid_erd(tables)
+
+        if output is None:
+            print(rendered)
+        else:
+            out_path = output.resolve()
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(rendered, encoding="utf-8")
+            print(f"Diagram successfully written to {out_path}")
+
+        sys.exit(0)
+    except Exception as exc:
+        _handle_error(exc)
+
 

@@ -8,6 +8,11 @@ import typer
 from db_governance.config import load_profile
 from db_governance.dictionary import load_dictionary, validate_dictionary_standards
 from db_governance.discovery import discover_artifacts
+from db_governance.edit_spec import (
+    add_column_to_doc,
+    modify_column_in_doc,
+    remove_column_from_doc,
+)
 from db_governance.errors import GovernanceError
 from db_governance.git_changes import resolve_changed_files
 from db_governance.impact import analyze_impact, render_impact_json, render_impact_text
@@ -519,6 +524,91 @@ def generate_spec(
         sys.exit(0)
     except Exception as exc:
         _handle_error(exc)
+
+
+edit_spec_app = typer.Typer(
+    name="edit-spec",
+    help="Edits existing table markdown specification documents directly via CLI.",
+    no_args_is_help=True,
+)
+app.add_typer(edit_spec_app, name="edit-spec")
+
+
+def _find_table_doc_path(project_root: Path, profile_path: Optional[Path], table_name: str) -> Path:
+    target_prof_path, prof, _ = load_profile(project_root, profile_path)
+    artifacts = discover_artifacts(project_root, prof)
+
+    table_upper = table_name.upper()
+    for group_name, path_list in artifacts.items():
+        for rel_path in path_list:
+            p = project_root / rel_path
+            if p.stem.upper() == table_upper:
+                return p
+
+    raise GovernanceError(
+        f"[DBG003] Table document for '{table_name}' not found in project artifacts.",
+        exit_code=2,
+    )
+
+
+@edit_spec_app.command("add-column")
+def edit_spec_add_column(
+    table: Annotated[str, typer.Option("--table", "-t", help="Target table name")],
+    name: Annotated[str, typer.Option("--name", "-n", help="Column name to add")],
+    type: Annotated[str, typer.Option("--type", help="Data type")],
+    desc: Annotated[str, typer.Option("--desc", help="Column description")] = "",
+    pk: Annotated[bool, typer.Option("--pk", help="Is primary key")] = False,
+    project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
+    profile: Annotated[Optional[Path], typer.Option("--profile", help="Explicit profile path")] = None,
+) -> None:
+    """Appends a new column to the markdown table specification file."""
+    try:
+        resolved_root = project.resolve()
+        doc_path = _find_table_doc_path(resolved_root, profile, table)
+        add_column_to_doc(doc_path, col_name=name, col_type=type, col_desc=desc, is_pk=pk)
+        print(f"Successfully added column '{name}' to '{doc_path.relative_to(resolved_root)}'")
+        sys.exit(0)
+    except Exception as exc:
+        _handle_error(exc)
+
+
+@edit_spec_app.command("modify-column")
+def edit_spec_modify_column(
+    table: Annotated[str, typer.Option("--table", "-t", help="Target table name")],
+    name: Annotated[str, typer.Option("--name", "-n", help="Column name to modify")],
+    type: Annotated[Optional[str], typer.Option("--type", help="New data type")] = None,
+    desc: Annotated[Optional[str], typer.Option("--desc", help="New column description")] = None,
+    project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
+    profile: Annotated[Optional[Path], typer.Option("--profile", help="Explicit profile path")] = None,
+) -> None:
+    """Modifies data type or description for an existing column in markdown table spec."""
+    try:
+        resolved_root = project.resolve()
+        doc_path = _find_table_doc_path(resolved_root, profile, table)
+        modify_column_in_doc(doc_path, col_name=name, col_type=type, col_desc=desc)
+        print(f"Successfully modified column '{name}' in '{doc_path.relative_to(resolved_root)}'")
+        sys.exit(0)
+    except Exception as exc:
+        _handle_error(exc)
+
+
+@edit_spec_app.command("remove-column")
+def edit_spec_remove_column(
+    table: Annotated[str, typer.Option("--table", "-t", help="Target table name")],
+    name: Annotated[str, typer.Option("--name", "-n", help="Column name to remove")],
+    project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
+    profile: Annotated[Optional[Path], typer.Option("--profile", help="Explicit profile path")] = None,
+) -> None:
+    """Removes an existing column from the markdown table specification file."""
+    try:
+        resolved_root = project.resolve()
+        doc_path = _find_table_doc_path(resolved_root, profile, table)
+        remove_column_from_doc(doc_path, col_name=name)
+        print(f"Successfully removed column '{name}' from '{doc_path.relative_to(resolved_root)}'")
+        sys.exit(0)
+    except Exception as exc:
+        _handle_error(exc)
+
 
 
 

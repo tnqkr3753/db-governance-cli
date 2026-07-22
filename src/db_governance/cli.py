@@ -283,11 +283,21 @@ def install_skill(
                 exit_code=2,
             )
 
-        # Locate skill directory in repo or package
-        src_skill = (Path(__file__).parent.parent.parent / "skills" / "database-governance").resolve()
-        if not src_skill.exists():
+        # Locate skill directory in package resources or repo
+        cand1 = (Path(__file__).parent / "skills" / "database-governance").resolve()
+        cand2 = (Path(__file__).parent.parent.parent / "skills" / "database-governance").resolve()
+        cand3 = (Path.cwd() / "skills" / "database-governance").resolve()
+
+        src_skill = None
+        for cand in [cand1, cand2, cand3]:
+            if cand.exists() and (cand / "SKILL.md").exists():
+                src_skill = cand
+                break
+
+        if src_skill is None:
             raise GovernanceError(
-                f"[DBG001] Source skill directory not found at {src_skill}", exit_code=2
+                f"[DBG001] Source skill directory not found in package resources ({cand1}) or repo ({cand2}).",
+                exit_code=2,
             )
 
         if dest.exists() or dest.is_symlink():

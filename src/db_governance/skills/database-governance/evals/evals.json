@@ -1,0 +1,36 @@
+[
+  {
+    "id": 1,
+    "name": "evbp-like-multi-artifact-change",
+    "prompt": "Review column addition to EVBP table document TB_MGT_USERS.md and check documentation synchronization.",
+    "expected_output": "Identifies missing companion changes (DDL migration, change history) with DBG201 findings and recommends updates without attempting live DB connections or migrations.",
+    "files": {
+      ".db-governance.toml": "version = 1\nname = \"evbp-test\"\n\n[[artifact_groups]]\nname = \"table-docs\"\nrole = \"source\"\npatterns = [\"데이터베이스/MGT/*.md\"]\nrequired = true\n\n[[artifact_groups]]\nname = \"ddl-migrations\"\nrole = \"migration\"\npatterns = [\"데이터베이스/DDL/V*.sql\"]\nrequired = true\n\n[[artifact_groups]]\nname = \"changelog\"\nrole = \"history\"\npatterns = [\"데이터베이스/변경이력.md\"]\nrequired = true\n\n[[rules]]\nid = \"EVBP-001\"\ndescription = \"Sync rule\"\nwhen_changed_any = [\"데이터베이스/MGT/*.md\"]\napplies_to = [\"semantic\", \"unknown\"]\nseverity = \"error\"\n\n[[rules.require_changed]]\nlabel = \"DDL migration\"\nmatch_any = [\"데이터베이스/DDL/V*.sql\"]\n\n[[rules.require_changed]]\nlabel = \"change history\"\nmatch_any = [\"데이터베이스/변경이력.md\"]\n",
+      "데이터베이스/MGT/TB_MGT_USERS.md": "# TB_MGT_USERS\n\n| Column | Type | Description |\n| --- | --- | --- |\n| USER_ID | VARCHAR(50) | User ID |\n| PHONE_NUM | VARCHAR(20) | User phone number |\n",
+      "데이터베이스/DDL/V1__tb_mgt_users.sql": "CREATE TABLE tb_mgt_users (\n    user_id VARCHAR(50) PRIMARY KEY\n);\n",
+      "데이터베이스/변경이력.md": "# Change History\n"
+    }
+  },
+  {
+    "id": 2,
+    "name": "alembic-style-repository",
+    "prompt": "Audit database documentation alignment for SQLAlchemy model and Alembic migration changes.",
+    "expected_output": "Evaluates contract synchronization using generic profile, does not demand EVBP or DBML paths, separates documentation state from live database state.",
+    "files": {
+      ".db-governance.toml": "version = 1\nname = \"alembic-proj\"\n\n[[artifact_groups]]\nname = \"table-docs\"\nrole = \"source\"\npatterns = [\"docs/schema/**/*.md\"]\nrequired = true\n\n[[artifact_groups]]\nname = \"migrations\"\nrole = \"migration\"\npatterns = [\"alembic/versions/*.py\"]\nrequired = true\n\n[[rules]]\nid = \"ALEMBIC-001\"\ndescription = \"Schema doc sync\"\nwhen_changed_any = [\"docs/schema/**/*.md\"]\napplies_to = [\"semantic\", \"unknown\"]\nseverity = \"error\"\n\n[[rules.require_changed]]\nlabel = \"Alembic migration\"\nmatch_any = [\"alembic/versions/*.py\"]\n",
+      "docs/schema/users.md": "# Users Table Spec\n\n| Column | Type |\n| --- | --- |\n| id | Integer |\n",
+      "alembic/versions/001_create_users.py": "# Alembic revision\n"
+    }
+  },
+  {
+    "id": 3,
+    "name": "formatting-only-flyway-repository",
+    "prompt": "Check re-formatted markdown header in table spec document.",
+    "expected_output": "Classifies change as formatting, bypasses semantic migration requirement rules, and outputs clean documentation state.",
+    "files": {
+      ".db-governance.toml": "version = 1\nname = \"flyway-proj\"\n\n[[artifact_groups]]\nname = \"table-docs\"\nrole = \"source\"\npatterns = [\"db/docs/*.md\"]\nrequired = true\n\n[[artifact_groups]]\nname = \"migrations\"\nrole = \"migration\"\npatterns = [\"db/migration/V*.sql\"]\nrequired = true\n\n[[rules]]\nid = \"FLYWAY-001\"\ndescription = \"Flyway sync\"\nwhen_changed_any = [\"db/docs/*.md\"]\napplies_to = [\"semantic\", \"unknown\"]\nseverity = \"error\"\n\n[[rules.require_changed]]\nlabel = \"Flyway migration\"\nmatch_any = [\"db/migration/V*.sql\"]\n",
+      "db/docs/orders.md": "# Orders Table Spec (Reformatted)\n",
+      "db/migration/V1__orders.sql": "CREATE TABLE orders (id BIGINT);\n"
+    }
+  }
+]

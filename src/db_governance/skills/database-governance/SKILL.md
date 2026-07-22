@@ -8,9 +8,9 @@ description: Inspect and maintain database documentation governance across repos
 This skill provides workflow guidance and deterministic auditing for database documentation synchronization, contract governance, and validator execution.
 
 > [!IMPORTANT]
-> **Safety Boundary & DB State Rule**
-> - The `dbg` CLI and database governance skill audit documentation and contract alignment only.
-> - `dbg` NEVER connects to a database, executes SQL, applies migrations, or infers live deployment status.
+> **Safety Boundary & Operational Role Declaration**
+> - `dbg` (including `dbg generate-spec`) produces document/DDL drafts and audits synchronization, but **NEVER automatically modifies existing definitions in-place or applies DDL to live databases.**
+> - Use `dbg` for missing-prevention and audit check gates (`dbg inspect` pre-task, `dbg check` post-task). Maintain manual procedures and `psql -v ON_ERROR_STOP=1 -1 -f ...` for live DB application and catalog verification.
 > - Reports always declare `live_database_state: "not_checked"`.
 
 ## Standard Audit & Governance Workflow

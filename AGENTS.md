@@ -9,8 +9,9 @@ All AI agents (Antigravity, Codex, Claude, etc.) and human contributors working 
 ## 1. Project Boundaries & Absolute Rules
 
 > [!IMPORTANT]
-> **Safety Boundary & Zero Live DB Connection**
-> - **v0.1 & v0.2 Scope**: `dbg` core NEVER connects to a database, executes SQL, applies migrations, or infers live deployment status.
+> **Safety Boundary & Operational Role Declaration**
+> - **`dbg` Scope & Role**: `dbg` (including `dbg generate-spec`) produces document/DDL drafts and audits synchronization, but **NEVER automatically modifies existing definitions in-place or applies DDL to live databases.**
+> - Use `dbg` for missing-prevention and audit check gates (`dbg inspect` pre-task, `dbg check` post-task). Maintain manual procedures and `psql -v ON_ERROR_STOP=1 -1 -f ...` for live DB application and catalog verification.
 > - `AuditReport.live_database_state` MUST remain hardcoded as `Literal["not_checked"] = "not_checked"`.
 > - External project validators (`--run-project-validators`) run only when explicitly requested, using `subprocess.run(..., shell=False)`.
 

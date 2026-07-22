@@ -75,7 +75,17 @@ dbg evidence --project /path/to/project \
   --overwrite
 ```
 
-### 6. `dbg install-skill`
+### 6. `dbg render`
+Renders Mermaid ERD or DBML diagram code from discovered table specifications.
+```bash
+# Output Mermaid erDiagram to stdout
+dbg render --project /path/to/project --format mermaid
+
+# Output DBML code to file
+dbg render --project /path/to/project --format dbml --output schema.dbml
+```
+
+### 7. `dbg install-skill`
 Installs or symlinks the `database-governance` skill into Antigravity's skills directory (`~/.gemini/config/skills/database-governance`).
 ```bash
 # Copy skill to default ~/.gemini/config/skills/database-governance

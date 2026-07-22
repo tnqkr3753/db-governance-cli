@@ -86,6 +86,7 @@ db-governance/
 │   ├── errors.py               # Exception hierarchy (GovernanceError, ProfileError)
 │   ├── git_changes.py          # NUL-terminated git diff/ls-files parser
 │   ├── models.py               # Pydantic v2 data models
+│   ├── render.py               # ERD (Mermaid) & DBML diagram renderer
 │   ├── report.py               # Text/JSON/Markdown report renderer & atomic evidence writer
 │   ├── rules.py                # Rule evaluation & regex glob matcher
 │   ├── runner.py               # Subprocess validator runner with secret masking

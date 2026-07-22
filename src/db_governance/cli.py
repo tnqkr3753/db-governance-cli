@@ -245,3 +245,63 @@ def evidence(
         sys.exit(1 if has_errors else 0)
     except Exception as exc:
         _handle_error(exc)
+
+
+@app.command("install-skill")
+def install_skill(
+    target_dir: Annotated[
+        Optional[Path],
+        typer.Option(
+            "--target-dir",
+            "-t",
+            help="Target skills directory (defaults to ~/.gemini/config/skills/database-governance)",
+        ),
+    ] = None,
+    symlink: Annotated[
+        bool, typer.Option("--symlink", "-s", help="Create symlink instead of copying files")
+    ] = False,
+    overwrite: Annotated[
+        bool, typer.Option("--overwrite", help="Overwrite existing skill directory")
+    ] = False,
+) -> None:
+    """Installs the database-governance skill into Antigravity skill configuration directory."""
+    import shutil
+
+    try:
+        if target_dir is None:
+            dest = (Path.home() / ".gemini" / "config" / "skills" / "database-governance").resolve()
+        else:
+            dest = target_dir.resolve()
+
+        if dest.exists() and not overwrite:
+            raise GovernanceError(
+                f"[DBG401] Skill destination directory '{dest}' already exists. Use --overwrite to replace.",
+                exit_code=2,
+            )
+
+        # Locate skill directory in repo or package
+        src_skill = (Path(__file__).parent.parent.parent / "skills" / "database-governance").resolve()
+        if not src_skill.exists():
+            raise GovernanceError(
+                f"[DBG001] Source skill directory not found at {src_skill}", exit_code=2
+            )
+
+        if dest.exists() or dest.is_symlink():
+            if dest.is_symlink() or dest.is_file():
+                dest.unlink()
+            else:
+                shutil.rmtree(dest)
+
+        dest.parent.mkdir(parents=True, exist_ok=True)
+
+        if symlink:
+            dest.symlink_to(src_skill, target_is_directory=True)
+            print(f"Successfully symlinked database-governance skill -> {dest}")
+        else:
+            shutil.copytree(src_skill, dest)
+            print(f"Successfully installed database-governance skill to {dest}")
+
+        sys.exit(0)
+    except Exception as exc:
+        _handle_error(exc)
+

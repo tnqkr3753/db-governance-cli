@@ -75,6 +75,16 @@ dbg evidence --project /path/to/project \
   --overwrite
 ```
 
+### 6. `dbg install-skill`
+Installs or symlinks the `database-governance` skill into Antigravity's skills directory (`~/.gemini/config/skills/database-governance`).
+```bash
+# Copy skill to default ~/.gemini/config/skills/database-governance
+dbg install-skill --overwrite
+
+# Symlink for development
+dbg install-skill --symlink --overwrite
+```
+
 ---
 
 ## Exit Code Contract

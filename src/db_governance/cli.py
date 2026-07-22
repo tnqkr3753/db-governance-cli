@@ -6,6 +6,7 @@ from typing import Annotated, Optional
 import typer
 
 from db_governance.config import load_profile
+from db_governance.ddl_manage import create_migration_file, get_next_migration_version
 from db_governance.dictionary import load_dictionary, validate_dictionary_standards
 from db_governance.discovery import discover_artifacts
 from db_governance.edit_spec import (
@@ -608,6 +609,35 @@ def edit_spec_remove_column(
         sys.exit(0)
     except Exception as exc:
         _handle_error(exc)
+
+
+@app.command("ddl-manage")
+def ddl_manage(
+    next_version: Annotated[bool, typer.Option("--next-version", help="Preview next migration version")] = False,
+    create: Annotated[bool, typer.Option("--create", help="Create new migration file scaffold")] = False,
+    slug: Annotated[Optional[str], typer.Option("--slug", help="Slug name for new migration file")] = None,
+    series: Annotated[str, typer.Option("--series", help="Version series (main|stg)")] = "main",
+    project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
+    profile: Annotated[Optional[Path], typer.Option("--profile", help="Explicit profile path")] = None,
+) -> None:
+    """Manages DDL migration version series and scaffolds new migration files."""
+    try:
+        resolved_root = project.resolve()
+        _, prof, _ = load_profile(resolved_root, profile)
+
+        if create:
+            if not slug:
+                raise GovernanceError("[DBG003] Slug name (--slug) is required when using --create.", exit_code=2)
+            created_file = create_migration_file(resolved_root, prof, slug=slug, series_name=series)
+            print(f"Successfully created migration file: {created_file.relative_to(resolved_root)}")
+        else:
+            ver_str, mig_dir = get_next_migration_version(resolved_root, prof, series_name=series)
+            print(f"Next Migration Version: {ver_str} (Target Directory: {mig_dir.relative_to(resolved_root)})")
+
+        sys.exit(0)
+    except Exception as exc:
+        _handle_error(exc)
+
 
 
 

@@ -1,0 +1,35 @@
+version = 1
+name = "generic-clean"
+
+[[artifact_groups]]
+name = "table-docs"
+role = "source"
+patterns = ["database/tables/**/*.md"]
+required = true
+
+[[artifact_groups]]
+name = "migrations"
+role = "migration"
+patterns = ["database/migrations/*.sql"]
+required = true
+
+[[artifact_groups]]
+name = "changelog"
+role = "history"
+patterns = ["database/CHANGELOG.md"]
+required = true
+
+[[rules]]
+id = "DBDOC-001"
+description = "A semantic table document change requires a migration and changelog update."
+when_changed_any = ["database/tables/**/*.md"]
+applies_to = ["semantic", "unknown"]
+severity = "error"
+
+[[rules.require_changed]]
+label = "migration"
+match_any = ["database/migrations/*.sql"]
+
+[[rules.require_changed]]
+label = "changelog update"
+match_any = ["database/CHANGELOG.md"]

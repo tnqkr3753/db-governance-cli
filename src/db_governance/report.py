@@ -9,49 +9,27 @@ from db_governance.models import AuditReport
 
 
 def render_text(report: AuditReport) -> str:
-    """Renders human-readable text audit report."""
+    """Renders concise, token-efficient text audit report."""
+    verdict = "PASS" if report.documentation_state == "clean" else "FAIL"
+
+    if verdict == "PASS" and not report.findings:
+        val_summary = f", {len(report.validators)} validator(s) passed" if report.validators else ""
+        return f"Verdict: PASS (project: {report.project_name}, doc state: clean{val_summary})"
+
     lines: list[str] = [
-        "==================================================",
-        "          DATABASE GOVERNANCE REPORT              ",
-        "==================================================",
-        f"Project Name        : {report.project_name}",
-        f"Project Root        : {report.project_root}",
-        f"Profile Path        : {report.profile_path}",
-        f"Profile Hash        : {report.profile_hash}",
-        f"Change Type         : {report.change_type}",
-        "--------------------------------------------------",
-        f"Documentation State : {report.documentation_state}",
-        f"Live Database State : {report.live_database_state}",
-        "--------------------------------------------------",
-        f"Verdict             : {'PASS' if report.documentation_state == 'clean' else 'FAIL'}",
-        "--------------------------------------------------",
-        "Changed Files:",
+        f"Verdict: FAIL (project: {report.project_name}, findings: {len(report.findings)})",
+        "Findings:",
     ]
-    if report.changed_files:
-        for cf in report.changed_files:
-            lines.append(f"  - {cf}")
-    else:
-        lines.append("  (none)")
+    for f in report.findings:
+        paths_str = f" [{', '.join(f.paths)}]" if f.paths else ""
+        lines.append(f"  - [{f.code}] {f.severity.upper()}: {f.message}{paths_str}")
 
-    lines.append("--------------------------------------------------")
-    lines.append(f"Findings ({len(report.findings)}):")
-    if report.findings:
-        for f in report.findings:
-            paths_str = f" [{', '.join(f.paths)}]" if f.paths else ""
-            lines.append(f"  - [{f.severity.upper()}] {f.code}: {f.message}{paths_str}")
-    else:
-        lines.append("  (no findings)")
-
-    lines.append("--------------------------------------------------")
-    lines.append(f"Validators ({len(report.validators)}):")
     if report.validators:
+        lines.append("Validators:")
         for v in report.validators:
-            status = "PASS" if v.exit_code == 0 else f"FAIL (exit {v.exit_code})"
-            lines.append(f"  - {v.name}: {status} ({v.duration_ms}ms)")
-    else:
-        lines.append("  (no validators executed)")
+            if v.exit_code != 0:
+                lines.append(f"  - [{v.name}] FAIL (exit {v.exit_code}, {v.duration_ms}ms)")
 
-    lines.append("==================================================")
     return "\n".join(lines)
 
 

@@ -90,8 +90,7 @@ def test_report_rendering_and_atomic_evidence_write(tmp_path: Path):
     )
 
     text_out = render_text(report)
-    assert "findings_detected" in text_out
-    assert "not_checked" in text_out
+    assert "Verdict: FAIL" in text_out
 
     json_out = render_json(report)
     assert '"live_database_state": "not_checked"' in json_out

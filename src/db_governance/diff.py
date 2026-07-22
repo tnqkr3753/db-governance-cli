@@ -159,19 +159,13 @@ def compare_table_specs(doc_table: TableSpec, ddl_table: TableSpec) -> list[Find
 
 
 def render_diff_text(target_table: str, findings: list[Finding]) -> str:
-    """Renders diff audit findings as formatted text."""
-    lines = [
-        "==================================================",
-        "             SCHEMA DIFF AUDIT REPORT             ",
-        "==================================================",
-        f"Target Table : {target_table.upper()}",
-        f"Total Findings: {len(findings)}",
-        "--------------------------------------------------",
-    ]
+    """Renders diff audit findings concisely for token efficiency."""
     if not findings:
-        lines.append("  Verdict: CLEAN (Doc and DDL schemas match 100%)")
-    else:
-        for f in findings:
-            lines.append(f"  - [{f.code}] ({f.severity.upper()}) {f.message}")
-    lines.append("==================================================")
+        return f"Table '{target_table.upper()}': CLEAN (No schema mismatches found)."
+
+    lines = [
+        f"Table '{target_table.upper()}' ({len(findings)} mismatches found):",
+    ]
+    for f in findings:
+        lines.append(f"  - [{f.code}] {f.message}")
     return "\n".join(lines)

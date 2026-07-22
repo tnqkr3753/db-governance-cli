@@ -559,15 +559,23 @@ def edit_spec_add_column(
     type: Annotated[str, typer.Option("--type", help="Data type")],
     desc: Annotated[str, typer.Option("--desc", help="Column description")] = "",
     pk: Annotated[bool, typer.Option("--pk", help="Is primary key")] = False,
+    write: Annotated[bool, typer.Option("--write", "-w", help="Write changes to disk (default: dry-run)")] = False,
     project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
     profile: Annotated[Optional[Path], typer.Option("--profile", help="Explicit profile path")] = None,
 ) -> None:
-    """Appends a new column to the markdown table specification file."""
+    """Appends a new column to markdown table spec (default is dry-run preview)."""
     try:
         resolved_root = project.resolve()
         doc_path = _find_table_doc_path(resolved_root, profile, table)
-        add_column_to_doc(doc_path, col_name=name, col_type=type, col_desc=desc, is_pk=pk)
-        print(f"Successfully added column '{name}' to '{doc_path.relative_to(resolved_root)}'")
+        out_text, written = add_column_to_doc(
+            doc_path, col_name=name, col_type=type, col_desc=desc, is_pk=pk, write=write
+        )
+        if not written:
+            print("--- DRY-RUN PREVIEW (use --write to save) ---")
+            print(out_text)
+        else:
+            print(f"Successfully added column '{name}' to '{doc_path.relative_to(resolved_root)}'")
+            print("Recommended next step: run 'dbg check' to verify contract synchronization.")
         sys.exit(0)
     except Exception as exc:
         _handle_error(exc)
@@ -579,6 +587,7 @@ def edit_spec_modify_column(
     name: Annotated[str, typer.Option("--name", "-n", help="Column name to modify")],
     type: Annotated[Optional[str], typer.Option("--type", help="New data type")] = None,
     desc: Annotated[Optional[str], typer.Option("--desc", help="New column description")] = None,
+    write: Annotated[bool, typer.Option("--write", "-w", help="Write changes to disk (default: dry-run)")] = False,
     project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
     profile: Annotated[Optional[Path], typer.Option("--profile", help="Explicit profile path")] = None,
 ) -> None:
@@ -586,8 +595,13 @@ def edit_spec_modify_column(
     try:
         resolved_root = project.resolve()
         doc_path = _find_table_doc_path(resolved_root, profile, table)
-        modify_column_in_doc(doc_path, col_name=name, col_type=type, col_desc=desc)
-        print(f"Successfully modified column '{name}' in '{doc_path.relative_to(resolved_root)}'")
+        out_text, written = modify_column_in_doc(doc_path, col_name=name, col_type=type, col_desc=desc, write=write)
+        if not written:
+            print("--- DRY-RUN PREVIEW (use --write to save) ---")
+            print(out_text)
+        else:
+            print(f"Successfully modified column '{name}' in '{doc_path.relative_to(resolved_root)}'")
+            print("Recommended next step: run 'dbg check' to verify contract synchronization.")
         sys.exit(0)
     except Exception as exc:
         _handle_error(exc)
@@ -597,15 +611,22 @@ def edit_spec_modify_column(
 def edit_spec_remove_column(
     table: Annotated[str, typer.Option("--table", "-t", help="Target table name")],
     name: Annotated[str, typer.Option("--name", "-n", help="Column name to remove")],
+    write: Annotated[bool, typer.Option("--write", "-w", help="Write changes to disk (default: dry-run)")] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Confirm deletion when combined with --write")] = False,
     project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
     profile: Annotated[Optional[Path], typer.Option("--profile", help="Explicit profile path")] = None,
 ) -> None:
-    """Removes an existing column from the markdown table specification file."""
+    """Removes an existing column from markdown table spec (requires --write --yes to save)."""
     try:
         resolved_root = project.resolve()
         doc_path = _find_table_doc_path(resolved_root, profile, table)
-        remove_column_from_doc(doc_path, col_name=name)
-        print(f"Successfully removed column '{name}' from '{doc_path.relative_to(resolved_root)}'")
+        out_text, written = remove_column_from_doc(doc_path, col_name=name, write=write, yes=yes)
+        if not written:
+            print("--- DRY-RUN PREVIEW (use --write --yes to save) ---")
+            print(out_text)
+        else:
+            print(f"Successfully removed column '{name}' from '{doc_path.relative_to(resolved_root)}'")
+            print("Recommended next step: run 'dbg check' to verify contract synchronization.")
         sys.exit(0)
     except Exception as exc:
         _handle_error(exc)

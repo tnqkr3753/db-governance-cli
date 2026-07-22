@@ -4,16 +4,15 @@ import re
 from pathlib import Path
 
 from db_governance.discovery import discover_artifacts
-from db_governance.errors import GovernanceError
 from db_governance.models import ArtifactRole, Finding, ProjectProfile, Severity
-from db_governance.render import ColumnSpec, TableSpec, parse_project_tables
+from db_governance.render import ColumnSpec, TableSpec
 
 
 def _parse_sql_columns_from_statement(sql: str, table_name: str) -> list[ColumnSpec]:
     """Parses CREATE TABLE statement for table_name into ColumnSpec list."""
     table_upper = table_name.upper()
     pattern = re.compile(
-        rf"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:[^\.\s]+\.)?([^\.\s\(\)]+)\s*\((.*?)\);",
+        r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:[^\.\s]+\.)?([^\.\s\(\)]+)\s*\((.*?)\);",
         re.IGNORECASE | re.DOTALL,
     )
 
@@ -24,24 +23,39 @@ def _parse_sql_columns_from_statement(sql: str, table_name: str) -> list[ColumnS
             continue
 
         body = match.group(2)
-        # Split by comma outside parentheses
-        lines = [line.strip() for line in body.splitlines() if line.strip()]
-        for line in lines:
-            line_clean = line.rstrip(",")
-            if (
-                line_clean.upper().startswith("PRIMARY KEY")
-                or line_clean.upper().startswith("FOREIGN KEY")
-                or line_clean.upper().startswith("CONSTRAINT")
+        items: list[str] = []
+        cur: list[str] = []
+        paren_depth = 0
+        for char in body:
+            if char == "(":
+                paren_depth += 1
+                cur.append(char)
+            elif char == ")":
+                paren_depth -= 1
+                cur.append(char)
+            elif char == "," and paren_depth == 0:
+                items.append("".join(cur).strip())
+                cur = []
+            else:
+                cur.append(char)
+        if cur:
+            items.append("".join(cur).strip())
+
+        for item in items:
+            item_clean = item.strip()
+            if not item_clean or any(
+                item_clean.upper().startswith(k)
+                for k in ["PRIMARY KEY", "FOREIGN KEY", "CONSTRAINT", "KEY", "INDEX", "UNIQUE"]
             ):
                 continue
 
-            parts = line_clean.split(maxsplit=2)
+            parts = item_clean.split(maxsplit=2)
             if len(parts) >= 2:
                 col_name = parts[0].strip("`\"'")
                 col_type = parts[1].upper()
                 rest = parts[2].upper() if len(parts) >= 3 else ""
                 is_pk = "PRIMARY KEY" in rest
-                is_null = "NOT NULL" not in rest
+                is_null = "NOT NULL" not in rest and not is_pk
                 columns.append(
                     ColumnSpec(name=col_name, data_type=col_type, is_pk=is_pk, is_nullable=is_null)
                 )
@@ -83,7 +97,7 @@ def build_effective_schema(
 
         # Process ALTER TABLE ADD COLUMN
         alter_pattern = re.compile(
-            rf"ALTER\s+TABLE\s+(?:[^\.\s]+\.)?([^\.\s\(\)]+)\s+ADD\s+(?:COLUMN\s+)?([^\s]+)\s+([^\s;,]+)",
+            r"ALTER\s+TABLE\s+(?:[^\.\s]+\.)?([^\.\s\(\)]+)\s+ADD\s+(?:COLUMN\s+)?([^\s]+)\s+([^\s;,]+)",
             re.IGNORECASE,
         )
         for match in alter_pattern.finditer(sql_content):

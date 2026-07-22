@@ -5,10 +5,7 @@ import sys
 from typing import Annotated, Optional
 import typer
 
-<<<<<<< HEAD
-=======
 from db_governance.config import load_profile
->>>>>>> main
 from db_governance.ddl_manage import create_migration_file, get_next_migration_version
 from db_governance.dictionary import load_dictionary, validate_dictionary_standards
 from db_governance.diff import build_effective_schema, compare_table_specs, render_diff_text
@@ -547,7 +544,7 @@ def _find_table_doc_path(project_root: Path, profile_path: Optional[Path], table
     for group_name, path_list in artifacts.items():
         for rel_path in path_list:
             p = project_root / rel_path
-            if p.stem.upper() == table_upper:
+            if table_upper == p.stem.upper() or table_upper in p.stem.upper():
                 return p
 
     raise GovernanceError(
@@ -678,7 +675,9 @@ def diff(
         artifacts = discover_artifacts(resolved_root, prof)
 
         tables = parse_project_tables(resolved_root, artifacts)
-        doc_table = next((t for t in tables if t.name.upper() == table.upper()), None)
+        doc_table = next(
+            (t for t in tables if table.upper() == t.name.upper() or table.upper() in t.name.upper()), None
+        )
         if not doc_table:
             raise GovernanceError(f"[DBG003] Table document for '{table}' not found.", exit_code=2)
 

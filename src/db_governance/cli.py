@@ -10,6 +10,7 @@ from db_governance.dictionary import load_dictionary, validate_dictionary_standa
 from db_governance.discovery import discover_artifacts
 from db_governance.errors import GovernanceError
 from db_governance.git_changes import resolve_changed_files
+from db_governance.impact import analyze_impact, render_impact_json, render_impact_text
 from db_governance.models import AuditReport, ChangeType, Finding, Severity
 from db_governance.render import parse_project_tables, render_dbml, render_mermaid_erd
 from db_governance.report import render_json, render_text, write_evidence
@@ -392,6 +393,33 @@ def dictionary(
         sys.exit(1 if has_errors else 0)
     except Exception as exc:
         _handle_error(exc)
+
+
+@app.command()
+def impact(
+    table: Annotated[str, typer.Option("--table", "-t", help="Target table name for impact analysis")],
+    column: Annotated[Optional[str], typer.Option("--column", "-c", help="Optional target column name")] = None,
+    project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
+    profile: Annotated[Optional[Path], typer.Option("--profile", help="Explicit profile path")] = None,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format (text|json)")] = "text",
+) -> None:
+    """Analyzes downstream file dependencies and impact when a table or column changes."""
+    try:
+        resolved_root = project.resolve()
+        _, prof, _ = load_profile(resolved_root, profile)
+        artifacts = discover_artifacts(resolved_root, prof)
+
+        report = analyze_impact(resolved_root, artifacts, table=table, column=column)
+
+        if format.lower() == "json":
+            print(render_impact_json(report))
+        else:
+            print(render_impact_text(report))
+
+        sys.exit(0)
+    except Exception as exc:
+        _handle_error(exc)
+
 
 
 

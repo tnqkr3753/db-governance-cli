@@ -85,7 +85,29 @@ dbg render --project /path/to/project --format mermaid
 dbg render --project /path/to/project --format dbml --output schema.dbml
 ```
 
-### 7. `dbg install-skill`
+### 7. `dbg dictionary`
+Validates discovered table specifications against data dictionary term recommendations and domain data type standards.
+```bash
+dbg dictionary --project /path/to/project --dictionary .db-dictionary.toml
+```
+
+### 8. `dbg impact`
+Analyzes downstream file dependencies and impact when a table or column changes.
+```bash
+dbg impact --project /path/to/project --table USERS --column status
+```
+
+### 9. `dbg generate-spec`
+Generates table markdown specification and DDL migration template scaffolding.
+```bash
+# Preview scaffolding
+dbg generate-spec --table PAYMENTS --columns "id:BIGINT,amount:DECIMAL(18_2)"
+
+# Write scaffold files to disk
+dbg generate-spec --table PAYMENTS --columns "id:BIGINT,amount:DECIMAL(18_2)" --write
+```
+
+### 10. `dbg install-skill`
 Installs or symlinks the `database-governance` skill into Antigravity's skills directory (`~/.gemini/config/skills/database-governance`).
 ```bash
 # Copy skill to default ~/.gemini/config/skills/database-governance

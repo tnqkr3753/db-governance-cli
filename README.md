@@ -107,14 +107,23 @@ dbg generate-spec --table PAYMENTS --columns "id:BIGINT,amount:DECIMAL(18_2)"
 dbg generate-spec --table PAYMENTS --columns "id:BIGINT,amount:DECIMAL(18_2)" --write
 ```
 
-### 10. `dbg install-skill`
-Installs or symlinks the `database-governance` skill into Antigravity's skills directory (`~/.gemini/config/skills/database-governance`).
+### 10. `dbg init-skill` / `dbg install-skill`
+Installs or symlinks the `database-governance` skill into Antigravity (`gemini`), `codex`, `claude`, `all` agent environments, or project-local directory.
 ```bash
-# Copy skill to default ~/.gemini/config/skills/database-governance
-dbg install-skill --overwrite
+# Install for Codex agent
+dbg init-skill codex --overwrite
 
-# Symlink for development
-dbg install-skill --symlink --overwrite
+# Install for Claude agent
+dbg init-skill claude --overwrite
+
+# Install for all detected agent environments (gemini, codex, claude)
+dbg init-skill all --overwrite
+
+# Install into project-local directory (.skills/database-governance)
+dbg init-skill --project . --overwrite
+
+# Symlink for local development
+dbg init-skill codex --symlink --overwrite
 ```
 
 ---

@@ -86,7 +86,11 @@ def resolve_changed_files(
     if explicit is not None and len(explicit) > 0:
         rel_paths: set[str] = set()
         for exp in explicit:
-            res_exp = exp.resolve()
+            if exp.is_absolute():
+                res_exp = exp.resolve()
+            else:
+                res_exp = (resolved_root / exp).resolve()
+
             if not res_exp.is_relative_to(resolved_root):
                 raise GovernanceError(
                     f"[DBG003] Explicit changed file '{exp}' resolves outside project root: {res_exp}",

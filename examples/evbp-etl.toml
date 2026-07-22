@@ -1,0 +1,72 @@
+version = 1
+name = "evbp-etl"
+
+[[artifact_groups]]
+name = "table-docs"
+role = "source"
+patterns = [
+  "데이터베이스/MGT/*.md",
+  "데이터베이스/STG/*.md",
+  "데이터베이스/DW/*.md",
+  "데이터베이스/DM/*.md",
+  "데이터베이스/IRIS_STG/*.md"
+]
+required = true
+
+[[artifact_groups]]
+name = "dbml-specs"
+role = "derived"
+patterns = [
+  "데이터베이스/**/*.dbml"
+]
+required = false
+
+[[artifact_groups]]
+name = "ddl-migrations"
+role = "migration"
+patterns = [
+  "데이터베이스/DDL/V*.sql",
+  "데이터베이스/STG/DDL/V*.sql"
+]
+required = true
+
+[[artifact_groups]]
+name = "changelog"
+role = "history"
+patterns = [
+  "데이터베이스/변경이력.md"
+]
+required = true
+
+[[rules]]
+id = "EVBP-DBDOC-001"
+description = "EVBP table doc changes require DDL migration and change history synchronization."
+when_changed_any = [
+  "데이터베이스/MGT/*.md",
+  "데이터베이스/STG/*.md",
+  "데이터베이스/DW/*.md",
+  "데이터베이스/DM/*.md",
+  "데이터베이스/IRIS_STG/*.md"
+]
+applies_to = ["semantic", "unknown"]
+severity = "error"
+
+[[rules.require_changed]]
+label = "DDL migration"
+match_any = [
+  "데이터베이스/DDL/V*.sql",
+  "데이터베이스/STG/DDL/V*.sql"
+]
+
+[[rules.require_changed]]
+label = "change history"
+match_any = [
+  "데이터베이스/변경이력.md"
+]
+
+[[validators]]
+name = "evbp verify ddl versions"
+argv = ["node", "데이터베이스/DDL/verify_ddl_versions.mjs"]
+cwd = "."
+timeout_seconds = 120
+max_output_bytes = 1048576

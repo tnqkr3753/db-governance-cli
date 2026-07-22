@@ -1,0 +1,35 @@
+version = 1
+name = "evbp-like"
+
+[[artifact_groups]]
+name = "table-docs"
+role = "source"
+patterns = ["데이터베이스/MGT/*.md"]
+required = true
+
+[[artifact_groups]]
+name = "ddl-migrations"
+role = "migration"
+patterns = ["데이터베이스/DDL/V*.sql"]
+required = true
+
+[[artifact_groups]]
+name = "changelog"
+role = "history"
+patterns = ["데이터베이스/변경이력.md"]
+required = true
+
+[[rules]]
+id = "EVBP-001"
+description = "EVBP table doc change rule"
+when_changed_any = ["데이터베이스/MGT/*.md"]
+applies_to = ["semantic", "unknown"]
+severity = "error"
+
+[[rules.require_changed]]
+label = "DDL migration"
+match_any = ["데이터베이스/DDL/V*.sql"]
+
+[[rules.require_changed]]
+label = "change history"
+match_any = ["데이터베이스/변경이력.md"]

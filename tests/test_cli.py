@@ -93,3 +93,44 @@ def test_cli_evidence_generation(tmp_path: Path):
     assert res.exit_code == 0
     assert (out_dir / "report.json").exists()
     assert (out_dir / "report.md").exists()
+
+
+def test_cli_evbp_like_clean_and_incomplete():
+    fixture_dir = Path("tests/fixtures/evbp_like").resolve()
+
+    # 1. Clean synchronized change
+    res_clean = runner.invoke(
+        app,
+        [
+            "check",
+            "--project",
+            str(fixture_dir),
+            "--changed-file",
+            "데이터베이스/MGT/TB_MGT_USERS.md",
+            "--changed-file",
+            "데이터베이스/DDL/V1__tb_mgt_users.sql",
+            "--changed-file",
+            "데이터베이스/변경이력.md",
+            "--change-type",
+            "semantic",
+        ],
+    )
+    assert res_clean.exit_code == 0
+
+    # 2. Missing history change
+    res_missing = runner.invoke(
+        app,
+        [
+            "check",
+            "--project",
+            str(fixture_dir),
+            "--changed-file",
+            "데이터베이스/MGT/TB_MGT_USERS.md",
+            "--changed-file",
+            "데이터베이스/DDL/V1__tb_mgt_users.sql",
+            "--change-type",
+            "semantic",
+        ],
+    )
+    assert res_missing.exit_code == 1
+    assert "change history" in res_missing.output

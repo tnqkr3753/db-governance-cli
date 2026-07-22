@@ -14,6 +14,7 @@ from db_governance.impact import analyze_impact, render_impact_json, render_impa
 from db_governance.models import AuditReport, ChangeType, Finding, Severity
 from db_governance.render import parse_project_tables, render_dbml, render_mermaid_erd
 from db_governance.report import render_json, render_text, write_evidence
+from db_governance.scaffold import generate_scaffold, parse_column_args
 from db_governance.rules import evaluate_required_artifacts, evaluate_rules
 from db_governance.runner import run_validators
 from db_governance.templates import render_candidate_profile
@@ -419,6 +420,47 @@ def impact(
         sys.exit(0)
     except Exception as exc:
         _handle_error(exc)
+
+
+@app.command("generate-spec")
+def generate_spec(
+    table: Annotated[str, typer.Option("--table", "-t", help="Table name to scaffold")],
+    columns: Annotated[
+        Optional[str], typer.Option("--columns", "-c", help="Columns spec (e.g. 'id:BIGINT,name:VARCHAR(100)')")
+    ] = None,
+    project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
+    profile: Annotated[Optional[Path], typer.Option("--profile", help="Explicit profile path")] = None,
+    write: Annotated[bool, typer.Option("--write", "-w", help="Write scaffold files to disk")] = False,
+) -> None:
+    """Generates table markdown specification and DDL migration template scaffolding."""
+    try:
+        resolved_root = project.resolve()
+        _, prof, _ = load_profile(resolved_root, profile)
+
+        cols = parse_column_args(columns)
+        doc_text, ddl_text, written = generate_scaffold(
+            resolved_root, prof, table_name=table, columns=cols, write=write
+        )
+
+        if not write:
+            print("==================================================")
+            print(f"       TABLE SPEC SCAFFOLD ({table.upper()})       ")
+            print("==================================================")
+            print(doc_text)
+            print("\n--------------------------------------------------")
+            print("                DDL SQL SCAFFOLD                  ")
+            print("--------------------------------------------------")
+            print(ddl_text)
+            print("==================================================")
+        else:
+            print("Successfully written scaffold files:")
+            for p in written:
+                print(f"  - {p}")
+
+        sys.exit(0)
+    except Exception as exc:
+        _handle_error(exc)
+
 
 
 

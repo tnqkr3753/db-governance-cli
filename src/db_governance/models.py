@@ -11,6 +11,13 @@ class ChangeType(StrEnum):
     UNKNOWN = "unknown"
 
 
+class AgentType(StrEnum):
+    GEMINI = "gemini"
+    CODEX = "codex"
+    CLAUDE = "claude"
+    ALL = "all"
+
+
 class Severity(StrEnum):
     ERROR = "error"
     WARNING = "warning"

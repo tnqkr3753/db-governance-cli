@@ -11,7 +11,7 @@ from db_governance.discovery import discover_artifacts
 from db_governance.errors import GovernanceError
 from db_governance.git_changes import resolve_changed_files
 from db_governance.impact import analyze_impact, render_impact_json, render_impact_text
-from db_governance.models import AuditReport, ChangeType, Finding, Severity
+from db_governance.models import AgentType, AuditReport, ChangeType, Finding, Severity
 from db_governance.render import parse_project_tables, render_dbml, render_mermaid_erd
 from db_governance.report import render_json, render_text, write_evidence
 from db_governance.scaffold import generate_scaffold, parse_column_args
@@ -251,37 +251,30 @@ def evidence(
         _handle_error(exc)
 
 
-@app.command("install-skill")
-def install_skill(
-    target_dir: Annotated[
-        Optional[Path],
-        typer.Option(
-            "--target-dir",
-            "-t",
-            help="Target skills directory (defaults to ~/.gemini/config/skills/database-governance)",
-        ),
-    ] = None,
-    symlink: Annotated[
-        bool, typer.Option("--symlink", "-s", help="Create symlink instead of copying files")
-    ] = False,
-    overwrite: Annotated[
-        bool, typer.Option("--overwrite", help="Overwrite existing skill directory")
-    ] = False,
+def _do_install_skill(
+    agent: AgentType,
+    project: Optional[Path],
+    target_dir: Optional[Path],
+    symlink: bool,
+    overwrite: bool,
 ) -> None:
-    """Installs the database-governance skill into Antigravity skill configuration directory."""
     import shutil
 
     try:
-        if target_dir is None:
-            dest = (Path.home() / ".gemini" / "config" / "skills" / "database-governance").resolve()
-        else:
-            dest = target_dir.resolve()
+        home = Path.home()
+        dests: list[Path] = []
 
-        if dest.exists() and not overwrite:
-            raise GovernanceError(
-                f"[DBG401] Skill destination directory '{dest}' already exists. Use --overwrite to replace.",
-                exit_code=2,
-            )
+        if target_dir is not None:
+            dests.append(target_dir.resolve())
+        elif project is not None:
+            dests.append((project.resolve() / ".skills" / "database-governance").resolve())
+        else:
+            if agent in (AgentType.GEMINI, AgentType.ALL):
+                dests.append((home / ".gemini" / "config" / "skills" / "database-governance").resolve())
+            if agent in (AgentType.CODEX, AgentType.ALL):
+                dests.append((home / ".codex" / "skills" / "database-governance").resolve())
+            if agent in (AgentType.CLAUDE, AgentType.ALL):
+                dests.append((home / ".claude" / "skills" / "database-governance").resolve())
 
         # Locate skill directory in package resources or repo
         cand1 = (Path(__file__).parent / "skills" / "database-governance").resolve()
@@ -300,24 +293,80 @@ def install_skill(
                 exit_code=2,
             )
 
-        if dest.exists() or dest.is_symlink():
-            if dest.is_symlink() or dest.is_file():
-                dest.unlink()
+        for dest in dests:
+            if dest.exists() and not overwrite:
+                raise GovernanceError(
+                    f"[DBG401] Skill destination directory '{dest}' already exists. Use --overwrite to replace.",
+                    exit_code=2,
+                )
+
+            if dest.exists() or dest.is_symlink():
+                if dest.is_symlink() or dest.is_file():
+                    dest.unlink()
+                else:
+                    shutil.rmtree(dest)
+
+            dest.parent.mkdir(parents=True, exist_ok=True)
+
+            if symlink:
+                dest.symlink_to(src_skill, target_is_directory=True)
+                print(f"Successfully symlinked database-governance skill -> {dest}")
             else:
-                shutil.rmtree(dest)
-
-        dest.parent.mkdir(parents=True, exist_ok=True)
-
-        if symlink:
-            dest.symlink_to(src_skill, target_is_directory=True)
-            print(f"Successfully symlinked database-governance skill -> {dest}")
-        else:
-            shutil.copytree(src_skill, dest)
-            print(f"Successfully installed database-governance skill to {dest}")
+                shutil.copytree(src_skill, dest)
+                print(f"Successfully installed database-governance skill to {dest}")
 
         sys.exit(0)
     except Exception as exc:
         _handle_error(exc)
+
+
+@app.command("install-skill")
+def install_skill(
+    agent: Annotated[
+        AgentType, typer.Argument(help="Target AI agent environment (gemini|codex|claude|all)")
+    ] = AgentType.GEMINI,
+    project: Annotated[
+        Optional[Path],
+        typer.Option("--project", "-p", help="Install into project-local .skills/database-governance directory"),
+    ] = None,
+    target_dir: Annotated[
+        Optional[Path],
+        typer.Option("--target-dir", "-t", help="Explicit target skills directory path"),
+    ] = None,
+    symlink: Annotated[
+        bool, typer.Option("--symlink", "-s", help="Create symlink instead of copying files")
+    ] = False,
+    overwrite: Annotated[
+        bool, typer.Option("--overwrite", help="Overwrite existing skill directory")
+    ] = False,
+) -> None:
+    """Installs database-governance skill into Antigravity/Codex/Claude agent or project-local directory."""
+    _do_install_skill(agent, project, target_dir, symlink, overwrite)
+
+
+@app.command("init-skill")
+def init_skill(
+    agent: Annotated[
+        AgentType, typer.Argument(help="Target AI agent environment (gemini|codex|claude|all)")
+    ] = AgentType.GEMINI,
+    project: Annotated[
+        Optional[Path],
+        typer.Option("--project", "-p", help="Install into project-local .skills/database-governance directory"),
+    ] = None,
+    target_dir: Annotated[
+        Optional[Path],
+        typer.Option("--target-dir", "-t", help="Explicit target skills directory path"),
+    ] = None,
+    symlink: Annotated[
+        bool, typer.Option("--symlink", "-s", help="Create symlink instead of copying files")
+    ] = False,
+    overwrite: Annotated[
+        bool, typer.Option("--overwrite", help="Overwrite existing skill directory")
+    ] = False,
+) -> None:
+    """Alias for install-skill. Initializes database-governance skill."""
+    _do_install_skill(agent, project, target_dir, symlink, overwrite)
+
 
 
 @app.command()

@@ -19,5 +19,6 @@ htmlcov/
 
 # Evidence outputs
 .evidence/
+.skills/
 tmp/
 scratch/

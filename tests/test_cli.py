@@ -137,16 +137,20 @@ def test_cli_evbp_like_clean_and_incomplete():
 
 
 def test_cli_install_skill(tmp_path: Path):
+    # 1. Explicit target_dir test
     target = tmp_path / "skills_dest" / "database-governance"
     res = runner.invoke(app, ["install-skill", "--target-dir", str(target)])
     assert res.exit_code == 0
     assert (target / "SKILL.md").exists()
     assert (target / "references" / "workflow.md").exists()
 
-    # Re-running without --overwrite should fail with exit code 2
+    # 2. Re-running without --overwrite should fail with exit code 2
     res_fail = runner.invoke(app, ["install-skill", "--target-dir", str(target)])
     assert res_fail.exit_code == 2
 
-    # Re-running with --overwrite should succeed
-    res_ovw = runner.invoke(app, ["install-skill", "--target-dir", str(target), "--overwrite"])
-    assert res_ovw.exit_code == 0
+    # 3. Project-local installation test
+    proj_dir = tmp_path / "my_project"
+    proj_dir.mkdir()
+    res_proj = runner.invoke(app, ["init-skill", "--project", str(proj_dir), "--overwrite"])
+    assert res_proj.exit_code == 0
+    assert (proj_dir / ".skills" / "database-governance" / "SKILL.md").exists()

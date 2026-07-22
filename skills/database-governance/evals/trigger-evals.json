@@ -1,0 +1,122 @@
+[
+  {
+    "id": 1,
+    "query": "Please review if our table markdown documentation and migration SQL files are synchronized.",
+    "should_trigger": true,
+    "reason": "Direct request for database documentation and migration contract synchronization."
+  },
+  {
+    "id": 2,
+    "query": "Check whether DBML schema spec is aligned with our database change history log.",
+    "should_trigger": true,
+    "reason": "Request for schema spec and database change history alignment."
+  },
+  {
+    "id": 3,
+    "query": "Audit repository database documentation completeness before release.",
+    "should_trigger": true,
+    "reason": "Database documentation completeness audit query."
+  },
+  {
+    "id": 4,
+    "query": "Verify table document changes in 데이터베이스/MGT against DDL version contracts.",
+    "should_trigger": true,
+    "reason": "Table documentation change verification query."
+  },
+  {
+    "id": 5,
+    "query": "Distinguish documented database schema state from live database deployment state.",
+    "should_trigger": true,
+    "reason": "Explicit query to separate documented schema state from live database state."
+  },
+  {
+    "id": 6,
+    "query": "Audit whether adding a column to database/tables/USERS.md requires a new migration file.",
+    "should_trigger": true,
+    "reason": "Check if schema doc change requires companion migration artifact."
+  },
+  {
+    "id": 7,
+    "query": "Generate a database governance evidence bundle for security audit.",
+    "should_trigger": true,
+    "reason": "Database governance evidence bundle request."
+  },
+  {
+    "id": 8,
+    "query": "Inspect matched database source artifacts and missing companion docs in repo.",
+    "should_trigger": true,
+    "reason": "Inspect database source artifacts and missing documentation."
+  },
+  {
+    "id": 9,
+    "query": "Check if our formatting edits in table docs trigger semantic database rules.",
+    "should_trigger": true,
+    "reason": "Query about change type classification for table documentation."
+  },
+  {
+    "id": 10,
+    "query": "Validate database schema documentation profile contracts for our repository.",
+    "should_trigger": true,
+    "reason": "Database schema documentation profile validation request."
+  },
+  {
+    "id": 11,
+    "query": "Write a SELECT query with JOIN to fetch active users from PostgreSQL database.",
+    "should_trigger": false,
+    "reason": "Application SQL query request, not database governance or schema documentation."
+  },
+  {
+    "id": 12,
+    "query": "Tune slow SQL query performance by adding a B-Tree index in production.",
+    "should_trigger": false,
+    "reason": "SQL performance tuning task, not documentation governance."
+  },
+  {
+    "id": 13,
+    "query": "Apply pending Flyway migrations directly to staging MySQL database server.",
+    "should_trigger": false,
+    "reason": "Live database migration execution request, which is strictly excluded from v0.1."
+  },
+  {
+    "id": 14,
+    "query": "Configure HikariCP database connection pool size in Spring Boot application.yml.",
+    "should_trigger": false,
+    "reason": "Application configuration task."
+  },
+  {
+    "id": 15,
+    "query": "Generate monthly revenue business summary report from existing sales table.",
+    "should_trigger": false,
+    "reason": "Business reporting task."
+  },
+  {
+    "id": 16,
+    "query": "Debug SQLAlchemy connection pool timeout error in Python backend service.",
+    "should_trigger": false,
+    "reason": "Application debugging task."
+  },
+  {
+    "id": 17,
+    "query": "Export CSV data dump from production database table users.",
+    "should_trigger": false,
+    "reason": "Data export task."
+  },
+  {
+    "id": 18,
+    "query": "Write a Python script using pandas to clean missing null values in dataset.",
+    "should_trigger": false,
+    "reason": "Data processing / analytics task."
+  },
+  {
+    "id": 19,
+    "query": "Create Docker compose container for PostgreSQL 16 database server.",
+    "should_trigger": false,
+    "reason": "Infrastructure setup task."
+  },
+  {
+    "id": 20,
+    "query": "Add a REST API endpoint in FastAPI to update user profile information.",
+    "should_trigger": false,
+    "reason": "Web application development task."
+  }
+]

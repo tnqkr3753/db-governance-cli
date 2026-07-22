@@ -16,6 +16,7 @@ from db_governance.edit_spec import (
     remove_column_from_doc,
 )
 from db_governance.errors import GovernanceError
+from db_governance.generate_ddl import generate_ddl_script
 from db_governance.git_changes import resolve_changed_files
 from db_governance.impact import analyze_impact, render_impact_json, render_impact_text
 from db_governance.models import AgentType, AuditReport, ChangeType, Finding, Severity
@@ -694,6 +695,40 @@ def diff(
         sys.exit(1 if any(f.severity == Severity.ERROR for f in findings) else 0)
     except Exception as exc:
         _handle_error(exc)
+
+
+@app.command("generate-ddl")
+def generate_ddl_cmd(
+    table: Annotated[str, typer.Option("--table", "-t", help="Target table name for DDL generation")],
+    base: Annotated[Optional[str], typer.Option("--base", help="Git reference to compute schema delta")] = None,
+    dialect: Annotated[str, typer.Option("--dialect", help="SQL Dialect (postgres only in v0.3.0)")] = "postgres",
+    project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
+    profile: Annotated[Optional[Path], typer.Option("--profile", help="Explicit profile path")] = None,
+    write: Annotated[bool, typer.Option("--write", "-w", help="Write DDL script into next migration file")] = False,
+) -> None:
+    """Generates PostgreSQL DDL migration SQL script from markdown table spec."""
+    try:
+        resolved_root = project.resolve()
+        _, prof, _ = load_profile(resolved_root, profile)
+
+        ddl_sql, written_path = generate_ddl_script(
+            resolved_root, prof, table_name=table, base_ref=base, dialect=dialect, write=write
+        )
+
+        if not write:
+            print("==================================================")
+            print(f"       POSTGRESQL DDL GENERATED ({table.upper()})  ")
+            print("==================================================")
+            print(ddl_sql)
+            print("==================================================")
+        else:
+            if written_path:
+                print(f"Successfully written DDL migration to: {written_path.relative_to(resolved_root)}")
+
+        sys.exit(0)
+    except Exception as exc:
+        _handle_error(exc)
+
 
 
 

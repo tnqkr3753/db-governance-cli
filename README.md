@@ -107,23 +107,46 @@ dbg generate-spec --table PAYMENTS --columns "id:BIGINT,amount:DECIMAL(18_2)"
 dbg generate-spec --table PAYMENTS --columns "id:BIGINT,amount:DECIMAL(18_2)" --write
 ```
 
-### 10. `dbg init-skill` / `dbg install-skill`
-Installs or symlinks the `database-governance` skill into Antigravity (`gemini`), `codex`, `claude`, `all` agent environments, or project-local directory.
+### 11. `dbg ddl-manage`
+Manages DDL migration version series and scaffolds new migration files safely.
 ```bash
-# Install for Codex agent
-dbg init-skill codex --overwrite
+# Preview next migration version
+dbg ddl-manage --project /path/to/project --next-version
 
-# Install for Claude agent
-dbg init-skill claude --overwrite
+# Create new migration file scaffold (e.g. V1_28__add_phone_num.sql)
+dbg ddl-manage --project /path/to/project --create --slug add_phone_num
+```
 
-# Install for all detected agent environments (gemini, codex, claude)
-dbg init-skill all --overwrite
+### 12. `dbg edit-spec`
+Edits existing table markdown specification documents directly via CLI. Default is dry-run preview; use `--write` to save, and `--write --yes` for deletion.
+```bash
+# Add new column (dry-run preview)
+dbg edit-spec add-column --project . --table USERS --name PHONE_NUM --type "VARCHAR(20)" --desc "Phone number"
 
-# Install into project-local directory (.skills/database-governance)
-dbg init-skill --project . --overwrite
+# Add new column and save to file
+dbg edit-spec add-column --project . --table USERS --name PHONE_NUM --type "VARCHAR(20)" --desc "Phone number" --write
 
-# Symlink for local development
-dbg init-skill codex --symlink --overwrite
+# Modify column data type or description
+dbg edit-spec modify-column --project . --table USERS --name PHONE_NUM --type "VARCHAR(30)" --write
+
+# Remove column from spec (requires --write --yes)
+dbg edit-spec remove-column --project . --table USERS --name PHONE_NUM --write --yes
+```
+
+### 13. `dbg diff`
+Compares table markdown specification 1:1 against the effective schema constructed from the repository's ordered migration chain.
+```bash
+dbg diff --project /path/to/project --table USERS
+```
+
+### 14. `dbg generate-ddl`
+Generates PostgreSQL DDL SQL scripts (CREATE TABLE or ALTER TABLE delta) from markdown table specs.
+```bash
+# Preview generated PostgreSQL DDL SQL
+dbg generate-ddl --project . --table USERS --dialect postgres
+
+# Write DDL script into a newly scaffolded migration file
+dbg generate-ddl --project . --table USERS --dialect postgres --write
 ```
 
 ---

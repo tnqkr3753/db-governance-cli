@@ -5,6 +5,10 @@ import sys
 from typing import Annotated, Optional
 import typer
 
+<<<<<<< HEAD
+=======
+from db_governance.config import load_profile
+>>>>>>> main
 from db_governance.ddl_manage import create_migration_file, get_next_migration_version
 from db_governance.dictionary import load_dictionary, validate_dictionary_standards
 from db_governance.diff import build_effective_schema, compare_table_specs, render_diff_text
@@ -559,15 +563,23 @@ def edit_spec_add_column(
     type: Annotated[str, typer.Option("--type", help="Data type")],
     desc: Annotated[str, typer.Option("--desc", help="Column description")] = "",
     pk: Annotated[bool, typer.Option("--pk", help="Is primary key")] = False,
+    write: Annotated[bool, typer.Option("--write", "-w", help="Write changes to disk (default: dry-run)")] = False,
     project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
     profile: Annotated[Optional[Path], typer.Option("--profile", help="Explicit profile path")] = None,
 ) -> None:
-    """Appends a new column to the markdown table specification file."""
+    """Appends a new column to markdown table spec (default is dry-run preview)."""
     try:
         resolved_root = project.resolve()
         doc_path = _find_table_doc_path(resolved_root, profile, table)
-        add_column_to_doc(doc_path, col_name=name, col_type=type, col_desc=desc, is_pk=pk)
-        print(f"Successfully added column '{name}' to '{doc_path.relative_to(resolved_root)}'")
+        out_text, written = add_column_to_doc(
+            doc_path, col_name=name, col_type=type, col_desc=desc, is_pk=pk, write=write
+        )
+        if not written:
+            print("--- DRY-RUN PREVIEW (use --write to save) ---")
+            print(out_text)
+        else:
+            print(f"Successfully added column '{name}' to '{doc_path.relative_to(resolved_root)}'")
+            print("Recommended next step: run 'dbg check' to verify contract synchronization.")
         sys.exit(0)
     except Exception as exc:
         _handle_error(exc)
@@ -579,6 +591,7 @@ def edit_spec_modify_column(
     name: Annotated[str, typer.Option("--name", "-n", help="Column name to modify")],
     type: Annotated[Optional[str], typer.Option("--type", help="New data type")] = None,
     desc: Annotated[Optional[str], typer.Option("--desc", help="New column description")] = None,
+    write: Annotated[bool, typer.Option("--write", "-w", help="Write changes to disk (default: dry-run)")] = False,
     project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
     profile: Annotated[Optional[Path], typer.Option("--profile", help="Explicit profile path")] = None,
 ) -> None:
@@ -586,8 +599,13 @@ def edit_spec_modify_column(
     try:
         resolved_root = project.resolve()
         doc_path = _find_table_doc_path(resolved_root, profile, table)
-        modify_column_in_doc(doc_path, col_name=name, col_type=type, col_desc=desc)
-        print(f"Successfully modified column '{name}' in '{doc_path.relative_to(resolved_root)}'")
+        out_text, written = modify_column_in_doc(doc_path, col_name=name, col_type=type, col_desc=desc, write=write)
+        if not written:
+            print("--- DRY-RUN PREVIEW (use --write to save) ---")
+            print(out_text)
+        else:
+            print(f"Successfully modified column '{name}' in '{doc_path.relative_to(resolved_root)}'")
+            print("Recommended next step: run 'dbg check' to verify contract synchronization.")
         sys.exit(0)
     except Exception as exc:
         _handle_error(exc)
@@ -597,15 +615,50 @@ def edit_spec_modify_column(
 def edit_spec_remove_column(
     table: Annotated[str, typer.Option("--table", "-t", help="Target table name")],
     name: Annotated[str, typer.Option("--name", "-n", help="Column name to remove")],
+    write: Annotated[bool, typer.Option("--write", "-w", help="Write changes to disk (default: dry-run)")] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Confirm deletion when combined with --write")] = False,
     project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
     profile: Annotated[Optional[Path], typer.Option("--profile", help="Explicit profile path")] = None,
 ) -> None:
-    """Removes an existing column from the markdown table specification file."""
+    """Removes an existing column from markdown table spec (requires --write --yes to save)."""
     try:
         resolved_root = project.resolve()
         doc_path = _find_table_doc_path(resolved_root, profile, table)
-        remove_column_from_doc(doc_path, col_name=name)
-        print(f"Successfully removed column '{name}' from '{doc_path.relative_to(resolved_root)}'")
+        out_text, written = remove_column_from_doc(doc_path, col_name=name, write=write, yes=yes)
+        if not written:
+            print("--- DRY-RUN PREVIEW (use --write --yes to save) ---")
+            print(out_text)
+        else:
+            print(f"Successfully removed column '{name}' from '{doc_path.relative_to(resolved_root)}'")
+            print("Recommended next step: run 'dbg check' to verify contract synchronization.")
+        sys.exit(0)
+    except Exception as exc:
+        _handle_error(exc)
+
+
+@app.command("ddl-manage")
+def ddl_manage(
+    next_version: Annotated[bool, typer.Option("--next-version", help="Preview next migration version")] = False,
+    create: Annotated[bool, typer.Option("--create", help="Create new migration file scaffold")] = False,
+    slug: Annotated[Optional[str], typer.Option("--slug", help="Slug name for new migration file")] = None,
+    series: Annotated[str, typer.Option("--series", help="Version series (main|stg)")] = "main",
+    project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
+    profile: Annotated[Optional[Path], typer.Option("--profile", help="Explicit profile path")] = None,
+) -> None:
+    """Manages DDL migration version series and scaffolds new migration files."""
+    try:
+        resolved_root = project.resolve()
+        _, prof, _ = load_profile(resolved_root, profile)
+
+        if create:
+            if not slug:
+                raise GovernanceError("[DBG003] Slug name (--slug) is required when using --create.", exit_code=2)
+            created_file = create_migration_file(resolved_root, prof, slug=slug, series_name=series)
+            print(f"Successfully created migration file: {created_file.relative_to(resolved_root)}")
+        else:
+            ver_str, mig_dir = get_next_migration_version(resolved_root, prof, series_name=series)
+            print(f"Next Migration Version: {ver_str} (Target Directory: {mig_dir.relative_to(resolved_root)})")
+
         sys.exit(0)
     except Exception as exc:
         _handle_error(exc)
@@ -642,6 +695,7 @@ def diff(
         sys.exit(1 if any(f.severity == Severity.ERROR for f in findings) else 0)
     except Exception as exc:
         _handle_error(exc)
+
 
 
 

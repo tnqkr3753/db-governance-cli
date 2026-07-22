@@ -20,8 +20,13 @@ def add_column_to_doc(
     col_desc: str = "",
     is_pk: bool = False,
     is_nullable: bool = True,
-) -> None:
-    """Appends a new column row to the markdown table in doc_path."""
+    write: bool = False,
+) -> tuple[str, bool]:
+    """Appends a new column row to the markdown table in doc_path.
+
+    Returns:
+        Tuple of (rendered markdown text, whether changes were written to file).
+    """
     if not doc_path.exists():
         raise GovernanceError(f"[DBG003] Target document file '{doc_path}' does not exist.", exit_code=2)
 
@@ -43,7 +48,6 @@ def add_column_to_doc(
                 continue
 
         if in_table:
-            # Check if next line is end of table
             next_line = lines[idx + 1] if idx + 1 < len(lines) else ""
             next_row = _parse_table_row(next_line)
             if not next_row and not added:
@@ -54,7 +58,10 @@ def add_column_to_doc(
     if not added:
         new_lines.append(new_row)
 
-    doc_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+    out_text = "\n".join(new_lines) + "\n"
+    if write:
+        doc_path.write_text(out_text, encoding="utf-8")
+    return out_text, write
 
 
 def modify_column_in_doc(
@@ -62,7 +69,8 @@ def modify_column_in_doc(
     col_name: str,
     col_type: str | None = None,
     col_desc: str | None = None,
-) -> None:
+    write: bool = False,
+) -> tuple[str, bool]:
     """Modifies data type or description for an existing column in doc_path."""
     if not doc_path.exists():
         raise GovernanceError(f"[DBG003] Target document file '{doc_path}' does not exist.", exit_code=2)
@@ -88,13 +96,27 @@ def modify_column_in_doc(
     if not modified:
         raise GovernanceError(f"[DBG201] Column '{col_name}' not found in '{doc_path}'.", exit_code=1)
 
-    doc_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+    out_text = "\n".join(new_lines) + "\n"
+    if write:
+        doc_path.write_text(out_text, encoding="utf-8")
+    return out_text, write
 
 
-def remove_column_from_doc(doc_path: Path, col_name: str) -> None:
+def remove_column_from_doc(
+    doc_path: Path,
+    col_name: str,
+    write: bool = False,
+    yes: bool = False,
+) -> tuple[str, bool]:
     """Removes a column row from the markdown table in doc_path."""
     if not doc_path.exists():
         raise GovernanceError(f"[DBG003] Target document file '{doc_path}' does not exist.", exit_code=2)
+
+    if write and not yes:
+        raise GovernanceError(
+            f"[DBG003] Removing column '{col_name}' requires explicit confirmation '--write --yes'.",
+            exit_code=2,
+        )
 
     lines = doc_path.read_text(encoding="utf-8").splitlines()
     new_lines: list[str] = []
@@ -112,4 +134,7 @@ def remove_column_from_doc(doc_path: Path, col_name: str) -> None:
     if not removed:
         raise GovernanceError(f"[DBG201] Column '{col_name}' not found in '{doc_path}'.", exit_code=1)
 
-    doc_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+    out_text = "\n".join(new_lines) + "\n"
+    if write and yes:
+        doc_path.write_text(out_text, encoding="utf-8")
+    return out_text, write

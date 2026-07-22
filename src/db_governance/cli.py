@@ -6,6 +6,7 @@ from typing import Annotated, Optional
 import typer
 
 from db_governance.config import load_profile
+from db_governance.dictionary import load_dictionary, validate_dictionary_standards
 from db_governance.discovery import discover_artifacts
 from db_governance.errors import GovernanceError
 from db_governance.git_changes import resolve_changed_files
@@ -339,5 +340,58 @@ def render(
         sys.exit(0)
     except Exception as exc:
         _handle_error(exc)
+
+
+@app.command()
+def dictionary(
+    project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
+    profile: Annotated[Optional[Path], typer.Option("--profile", help="Explicit profile path")] = None,
+    dictionary: Annotated[
+        Optional[Path], typer.Option("--dictionary", "-d", help="Explicit dictionary TOML path")
+    ] = None,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format (text|json)")] = "text",
+) -> None:
+    """Validates discovered table specifications against data dictionary standards."""
+    try:
+        resolved_root = project.resolve()
+        target_prof_path, prof, prof_hash = load_profile(resolved_root, profile)
+        artifacts = discover_artifacts(resolved_root, prof)
+
+        tables = parse_project_tables(resolved_root, artifacts)
+
+        dict_path = dictionary or (resolved_root / ".db-dictionary.toml")
+        if not dict_path.exists():
+            findings = []
+        else:
+            dict_prof = load_dictionary(dict_path)
+            findings = validate_dictionary_standards(tables, dict_prof)
+
+        has_errors = any(f.severity == Severity.ERROR for f in findings)
+        doc_state = "findings_detected" if has_errors else "clean"
+
+        report = AuditReport(
+            schema_version=1,
+            project_name=prof.name,
+            project_root=str(resolved_root),
+            profile_path=str(target_prof_path),
+            profile_hash=prof_hash,
+            change_type=ChangeType.UNKNOWN,
+            changed_files=[],
+            artifacts=artifacts,
+            findings=findings,
+            validators=[],
+            documentation_state=doc_state,
+            live_database_state="not_checked",
+        )
+
+        if format.lower() == "json":
+            print(render_json(report))
+        else:
+            print(render_text(report))
+
+        sys.exit(1 if has_errors else 0)
+    except Exception as exc:
+        _handle_error(exc)
+
 
 

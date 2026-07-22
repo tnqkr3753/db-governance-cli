@@ -4,7 +4,6 @@ import datetime
 import re
 from pathlib import Path
 
-from db_governance.discovery import discover_artifacts
 from db_governance.errors import GovernanceError
 from db_governance.models import ArtifactRole, ProjectProfile
 
@@ -16,22 +15,20 @@ def get_next_migration_version(
 ) -> tuple[str, Path]:
     """Computes next migration version string (e.g. 'V1_26') and target directory path."""
     resolved_root = project_root.resolve()
-    artifacts = discover_artifacts(resolved_root, profile)
 
-    mig_dir = resolved_root / "database" / "migrations"
-    mig_files: list[Path] = []
-
-    for group in profile.artifact_groups:
-        if group.role == ArtifactRole.MIGRATION:
-            if group.patterns:
+    target_series = next((s for s in profile.version_series if s.name.lower() == series_name.lower()), None)
+    if target_series:
+        mig_dir = (resolved_root / target_series.directory).resolve()
+    else:
+        mig_dir = resolved_root / "database" / "migrations"
+        for group in profile.artifact_groups:
+            if group.role == ArtifactRole.MIGRATION and group.patterns:
                 pat = group.patterns[0]
                 pat_dir = Path(pat.split("*")[0]).parent if "*" in pat else Path(pat).parent
                 mig_dir = (resolved_root / pat_dir).resolve()
+                break
 
-            for rel_p in artifacts.get(group.name, []):
-                p = resolved_root / rel_p
-                if p.suffix.lower() == ".sql":
-                    mig_files.append(p)
+    mig_files: list[Path] = list(mig_dir.glob("*.sql")) if mig_dir.exists() else []
 
     if not mig_files and mig_dir.exists():
         mig_files = list(mig_dir.glob("*.sql"))

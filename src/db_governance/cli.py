@@ -705,6 +705,7 @@ def generate_ddl_cmd(
     project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
     profile: Annotated[Optional[Path], typer.Option("--profile", help="Explicit profile path")] = None,
     write: Annotated[bool, typer.Option("--write", "-w", help="Write DDL script into next migration file")] = False,
+    force: Annotated[bool, typer.Option("--force", "-f", help="Bypass diff safety checks when using --write")] = False,
 ) -> None:
     """Generates PostgreSQL DDL migration SQL script from markdown table spec."""
     try:
@@ -712,7 +713,7 @@ def generate_ddl_cmd(
         _, prof, _ = load_profile(resolved_root, profile)
 
         ddl_sql, written_path = generate_ddl_script(
-            resolved_root, prof, table_name=table, base_ref=base, dialect=dialect, write=write
+            resolved_root, prof, table_name=table, base_ref=base, dialect=dialect, write=write, force=force
         )
 
         if not write:

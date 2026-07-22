@@ -40,24 +40,39 @@ def parse_markdown_table_spec(text: str, default_name: str) -> TableSpec:
     for line in lines:
         if "|" in line:
             parts = [p.strip() for p in line.split("|")[1:-1]]
+            parts_low = [p.lower() for p in parts]
             if len(parts) >= 2:
-                row_str = " ".join(parts).lower()
-                if any(h in row_str for h in ["column", "컬럼", "field"]) and any(
-                    t in row_str for t in ["type", "타입", "data"]
-                ):
+                has_col_header = any(any(h in p for h in ["컬럼명", "컬럼", "column", "field", "name"]) for p in parts_low)
+                has_type_header = any(any(t in p for t in ["타입", "type", "datatype", "data_type"]) for p in parts_low)
+
+                if has_col_header and has_type_header:
                     in_col_table = True
-                    for idx, p in enumerate(parts):
-                        p_low = p.lower()
-                        if p_low in ("컬럼명", "컬럼", "column", "field", "name"):
+                    name_idx = None
+                    type_idx = None
+                    pk_idx = None
+                    desc_idx = None
+
+                    for idx, p in enumerate(parts_low):
+                        if name_idx is None and p in ("컬럼명", "컬럼", "column", "field", "name"):
                             name_idx = idx
-                        elif p_low in ("타입", "type", "datatype", "data_type"):
+                        elif type_idx is None and any(t in p for t in ["데이터 타입", "데이터타입", "타입", "type", "datatype", "data_type"]):
                             type_idx = idx
-                        elif "pk" in p_low or "primary" in p_low:
+                        elif pk_idx is None and ("pk" in p or "primary" in p):
                             pk_idx = idx
-                        elif "설명" in p_low or "description" in p_low or "desc" in p_low:
+                        elif desc_idx is None and ("설명" in p or "description" in p or "desc" in p):
                             desc_idx = idx
+
+                    if name_idx is None:
+                        for idx, p in enumerate(parts_low):
+                            if "컬럼" in p and "한글" not in p:
+                                name_idx = idx
+                                break
+
+                    name_idx = name_idx if name_idx is not None else 0
+                    type_idx = type_idx if type_idx is not None else 1
                     continue
 
+                row_str = " ".join(parts).lower()
                 if "---" in row_str:
                     continue
 
@@ -65,9 +80,9 @@ def parse_markdown_table_spec(text: str, default_name: str) -> TableSpec:
                     if len(parts) <= max(name_idx, type_idx):
                         continue
 
-                    col_name = parts[name_idx].strip("`\"'")
+                    col_name = parts[name_idx].strip("`\"'").upper()
                     col_type = parts[type_idx].strip("`\"'")
-                    if col_name and not col_name.isdigit() and col_name.lower() not in ("컬럼명", "컬럼", "column", "field", "name", "no"):
+                    if col_name and not col_name.isdigit():
                         is_pk = (
                             (pk_idx is not None and len(parts) > pk_idx and "Y" in parts[pk_idx].upper())
                             or "PK" in col_type.upper()

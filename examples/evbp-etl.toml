@@ -70,3 +70,13 @@ argv = ["node", "데이터베이스/DDL/verify_ddl_versions.mjs"]
 cwd = "."
 timeout_seconds = 120
 max_output_bytes = 1048576
+
+[[version_series]]
+name = "main"
+directory = "데이터베이스/DDL"
+pattern = "V1_{N}__*.sql"
+
+[[version_series]]
+name = "stg"
+directory = "데이터베이스/STG/DDL"
+pattern = "V1_{N}__*.sql"

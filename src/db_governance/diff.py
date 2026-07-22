@@ -49,16 +49,29 @@ def _parse_sql_columns_from_statement(sql: str, table_name: str) -> list[ColumnS
             ):
                 continue
 
-            parts = item_clean.split(maxsplit=2)
+            parts = item_clean.split(maxsplit=1)
             if len(parts) >= 2:
                 col_name = parts[0].strip("`\"'")
-                col_type = parts[1].upper()
-                rest = parts[2].upper() if len(parts) >= 3 else ""
-                is_pk = "PRIMARY KEY" in rest
-                is_null = "NOT NULL" not in rest and not is_pk
-                columns.append(
-                    ColumnSpec(name=col_name, data_type=col_type, is_pk=is_pk, is_nullable=is_null)
+                rest_str = parts[1].strip()
+
+                # Match multi-word types like CHARACTER VARYING(30), TIMESTAMP WITHOUT TIME ZONE
+                type_match = re.match(
+                    r"^((?:CHARACTER\s+VARYING|DOUBLE\s+PRECISION|TIMESTAMP\s+(?:WITHOUT|WITH)\s+TIME\s+ZONE|[^\s]+)(?:\s*\([^\)]+\))?)",
+                    rest_str,
+                    re.IGNORECASE,
                 )
+                if type_match:
+                    raw_type = type_match.group(1).upper()
+                    # Normalize CHARACTER VARYING -> VARCHAR for parity comparison
+                    col_type = re.sub(r"\bCHARACTER\s+VARYING\b", "VARCHAR", raw_type)
+                    col_type = re.sub(r"\bTIMESTAMP\s+(?:WITHOUT|WITH)\s+TIME\s+ZONE\b", "TIMESTAMP", col_type)
+
+                    rest_upper = rest_str[len(type_match.group(1)) :].upper()
+                    is_pk = "PRIMARY KEY" in rest_upper
+                    is_null = "NOT NULL" not in rest_upper and not is_pk
+                    columns.append(
+                        ColumnSpec(name=col_name, data_type=col_type, is_pk=is_pk, is_nullable=is_null)
+                    )
     return columns
 
 

@@ -67,6 +67,13 @@ class ValidatorSpec(BaseModel):
     max_output_bytes: int = Field(default=1_048_576, ge=1024, le=10_485_760)
 
 
+class VersionSeriesSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str
+    directory: str
+    pattern: str = "V1_{N}__*.sql"
+
+
 class ProjectProfile(BaseModel):
     model_config = ConfigDict(extra="forbid")
     version: int
@@ -74,6 +81,7 @@ class ProjectProfile(BaseModel):
     artifact_groups: list[ArtifactGroup]
     rules: list[SyncRule]
     validators: list[ValidatorSpec] = Field(default_factory=list)
+    version_series: list[VersionSeriesSpec] = Field(default_factory=list)
 
 
 class Finding(BaseModel):

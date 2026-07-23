@@ -1,70 +1,46 @@
 ---
 name: database-governance
-description: Inspect and maintain database documentation governance across repositories. Use this skill whenever a user asks to document or review schema changes, synchronize migrations with table docs, DBML or ERD artifacts, update database change history, audit whether database documentation is complete, or distinguish documented schema state from live database state. Do not use it merely to write an application query or tune SQL performance.
+description: Inspect, audit, and maintain database contract synchronization, semantic history events, and migration context across repositories.
 ---
 
-# Database Governance Skill
+# Database Governance Skill (dbg v0.4.0)
 
-This skill provides workflow guidance and deterministic auditing for database documentation synchronization, contract governance, and validator execution.
+Use this skill whenever doing any database task (e.g. adding columns, modifying tables, inspecting schemas, auditing contract synchronization, or managing DDL versions).
 
-> [!IMPORTANT]
-> **Safety Boundary & Operational Role Declaration**
-> - `dbg` (including `dbg generate-spec`) produces document/DDL drafts and audits synchronization, but **NEVER automatically modifies existing definitions in-place or applies DDL to live databases.**
-> - Use `dbg` for missing-prevention and audit check gates (`dbg inspect` pre-task, `dbg check` post-task). Maintain manual procedures and `psql -v ON_ERROR_STOP=1 -1 -f ...` for live DB application and catalog verification.
-> - Reports always declare `live_database_state: "not_checked"`.
+## Core Governance Principles & Safety Boundaries
 
-## Standard Audit & Governance Workflow
+1. **Audit & Evidence Boundary:**
+   `dbg` is strictly a contract audit, semantic history, and context evidence tool.
+   - It **NEVER** connects to live databases or executes DDL on a live database.
+   - `AuditReport.live_database_state` is always `"not_checked"`.
+   - `dbg` does NOT automatically generate executable `CREATE TABLE` / `ALTER TABLE` DDL SQL.
 
-Follow this procedure when assisting with database documentation and contract governance:
+2. **Migration Authoring Routing:**
+   To design a migration, use `dbg migration-context` to gather structured evidence, and delegate DDL, backfill, and validation planning to the **`database-migration-design`** skill.
 
-### 1. Installation & Environment Inspection
-Verify the CLI is installed or run it via `uv`:
-```bash
-dbg doctor --project .
-# or fallback:
-uv run dbg doctor --project .
-```
+3. **Immutable History Events:**
+   When `require_event_for_semantic_changes = true` in profile, every semantic change MUST have a recorded history event under `.db-governance/history/`.
 
-### 2. Profile Discovery & Inspection
-Run `dbg inspect` to inventory database artifacts (table docs, migrations, changelog, DBML):
+## Mandatory Workflow Steps
+
+### Step 1: Inspect & Gather Context
 ```bash
 dbg inspect --project . --format text
+dbg migration-context --project . --table <TABLE_NAME> --base origin/main --format json
 ```
-If `.db-governance.toml` is missing:
-1. Preview candidate profile: `dbg init --project .`
-2. Write profile with user confirmation: `dbg init --project . --write`
-3. Refer to [project-profile.md](file:///Users/yuntaepark/Work/database-manager/db-governance/skills/database-governance/references/project-profile.md) for custom TOML rules.
 
-### 3. Change Set Classification
-Classify changed artifacts into one of three categories (see [change-classification.md](file:///Users/yuntaepark/Work/database-manager/db-governance/skills/database-governance/references/change-classification.md)):
-- `semantic`: Schema structure, column additions/deletions, type/nullability modifications.
-- `formatting`: Typos, markdown formatting, whitespace, comments (bypasses migration requirements).
-- `unknown`: Unsure or unclassified (evaluates semantic rules conservatively with `DBG202` warning).
-
-### 4. Synchronization Check
-Run `dbg check` with explicit changed files or Git base reference:
+### Step 2: Edit Specification (Dry-Run Preview first)
 ```bash
-dbg check --project . --changed-file database/tables/USERS.md --change-type semantic
+dbg edit-spec add-column --project . --table <TABLE> --name <COL> --type "<TYPE>" --write
 ```
-For trusted repositories with configured project validators:
+
+### Step 3: Scaffold Migration Version File
 ```bash
-dbg check --project . --base HEAD --change-type semantic --run-project-validators
+dbg ddl-manage --project . --series main --create --slug <SLUG>
 ```
 
-### 5. Remediation & Companion Updates
-If `dbg check` reports missing companion changes (`DBG201`):
-1. Update the required companion artifacts (e.g. migration SQL, change history, DBML).
-2. Re-run `dbg check` until documentation state is `clean` (verdict: PASS).
-
-### 6. Evidence Generation
-When evidence artifacts are requested:
+### Step 4: Record History Event & Audit Contract
 ```bash
-dbg evidence --project . --output .evidence/bundle --overwrite
+dbg history record --staged --write
+dbg check --project . --base origin/main --change-type semantic --run-project-validators
 ```
-This produces `report.json` and `report.md` atomically.
-
-## Detailed References
-- [workflow.md](file:///Users/yuntaepark/Work/database-manager/db-governance/skills/database-governance/references/workflow.md): Complete CLI command selection and fallback workflows.
-- [change-classification.md](file:///Users/yuntaepark/Work/database-manager/db-governance/skills/database-governance/references/change-classification.md): Rules and examples for semantic vs formatting changes.
-- [project-profile.md](file:///Users/yuntaepark/Work/database-manager/db-governance/skills/database-governance/references/project-profile.md): Profile TOML schema specification.
-- [report-format.md](file:///Users/yuntaepark/Work/database-manager/db-governance/skills/database-governance/references/report-format.md): Report structure and finding code details.

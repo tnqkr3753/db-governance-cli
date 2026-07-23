@@ -42,4 +42,4 @@ def test_cli_generate_spec_command(tmp_path: Path):
     )
     assert res.exit_code == 0
     assert "PAYMENTS" in res.output
-    assert "CREATE TABLE" in res.output
+    assert "Table Documentation" in res.output

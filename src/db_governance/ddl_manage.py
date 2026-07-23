@@ -1,11 +1,11 @@
-"""DDL migration version series manager module."""
+"""DDL Migration version series parser and scaffold creator (dbg ddl-manage)."""
 
-import datetime
+from datetime import datetime, timezone
 import re
 from pathlib import Path
 
 from db_governance.errors import GovernanceError
-from db_governance.models import ArtifactRole, ProjectProfile
+from db_governance.models import ProjectProfile
 
 
 def get_next_migration_version(
@@ -13,28 +13,32 @@ def get_next_migration_version(
     profile: ProjectProfile,
     series_name: str = "main",
 ) -> tuple[str, Path]:
-    """Computes next migration version string (e.g. 'V1_26') and target directory path."""
+    """Computes next migration version string (e.g. 'V1_28') and target directory path."""
     resolved_root = project_root.resolve()
 
-    target_series = next((s for s in profile.version_series if s.name.lower() == series_name.lower()), None)
-    if target_series:
-        mig_dir = (resolved_root / target_series.directory).resolve()
-    else:
+    target_series = next((s for s in profile.migration_series if s.name.lower() == series_name.lower()), None)
+    if not target_series:
+        if profile.migration_series:
+            available = ", ".join(s.name for s in profile.migration_series)
+            raise GovernanceError(
+                f"[DBG003] Migration series '{series_name}' not defined in profile. Available series: {available}",
+                exit_code=2,
+            )
         mig_dir = resolved_root / "database" / "migrations"
         for group in profile.artifact_groups:
-            if group.role == ArtifactRole.MIGRATION and group.patterns:
+            if group.role.value == "migration" and group.patterns:
                 pat = group.patterns[0]
                 pat_dir = Path(pat.split("*")[0]).parent if "*" in pat else Path(pat).parent
                 mig_dir = (resolved_root / pat_dir).resolve()
                 break
+    else:
+        mig_dir = (resolved_root / target_series.directory).resolve()
 
     mig_files: list[Path] = list(mig_dir.glob("*.sql")) if mig_dir.exists() else []
 
-    if not mig_files and mig_dir.exists():
-        mig_files = list(mig_dir.glob("*.sql"))
-
     max_major = 1
     max_minor = 0
+    has_minor_format = False
 
     version_pattern = re.compile(r"^V(\d+)(?:_(\d+))?__", re.IGNORECASE)
 
@@ -43,10 +47,12 @@ def get_next_migration_version(
         if m:
             major = int(m.group(1))
             minor = int(m.group(2)) if m.group(2) is not None else 0
+            if m.group(2) is not None:
+                has_minor_format = True
             if (major, minor) > (max_major, max_minor):
                 max_major, max_minor = major, minor
 
-    if max_minor > 0 or any("_" in f.name.split("__")[0] for f in mig_files):
+    if has_minor_format:
         next_minor = max_minor + 1
         next_ver_str = f"V{max_major}_{next_minor:02d}"
     else:
@@ -63,22 +69,26 @@ def create_migration_file(
     slug: str,
     series_name: str = "main",
 ) -> Path:
-    """Safely creates a new migration DDL template file with next computed version."""
-    next_ver, mig_dir = get_next_migration_version(project_root, profile, series_name)
-    clean_slug = slug.strip().lower().replace("-", "_").replace(" ", "_")
-    target_path = mig_dir / f"{next_ver}__{clean_slug}.sql"
+    """Creates a new comment-headered empty migration SQL file."""
+    ver_str, mig_dir = get_next_migration_version(project_root, profile, series_name=series_name)
+    file_name = f"{ver_str}__{slug.lower()}.sql"
+    target_file = mig_dir / file_name
 
-    if target_path.exists():
-        raise GovernanceError(f"[DBG401] Migration file '{target_path}' already exists.", exit_code=2)
+    if target_file.exists():
+        raise GovernanceError(
+            f"[DBG401] Target migration file already exists: {target_file.relative_to(project_root.resolve())}",
+            exit_code=2,
+        )
 
-    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    header = [
-        f"-- Migration: {target_path.name}",
-        f"-- Created: {now_str}",
-        f"-- Description: Migration script for {clean_slug}",
-        "",
-        "-- TODO: Add DDL SQL statements below",
-        "",
-    ]
-    target_path.write_text("\n".join(header), encoding="utf-8")
-    return target_path
+    now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    header_content = (
+        f"-- Migration: {ver_str}__{slug}\n"
+        f"-- Migration Series: {series_name}\n"
+        f"-- Version: {ver_str}\n"
+        f"-- Created: {now_utc}\n"
+        f"-- Slug: {slug}\n"
+        "-- Note: Design DDL, data backfill, and transactional validation plans using the 'database-migration-design' skill.\n\n"
+    )
+
+    target_file.write_text(header_content, encoding="utf-8")
+    return target_file

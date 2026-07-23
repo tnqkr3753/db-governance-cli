@@ -138,3 +138,8 @@ def write_evidence(
         tmp_sub.rmdir()
     except OSError:
         pass
+
+
+def write_evidence_file(report: AuditReport, output_dir: Path) -> None:
+    """Writes evidence report.json and report.md files atomically."""
+    write_evidence(report, output_dir, overwrite=True)

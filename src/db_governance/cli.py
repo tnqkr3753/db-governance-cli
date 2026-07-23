@@ -1,5 +1,6 @@
-"""Typer CLI interface for db-governance."""
+"""Typer CLI interface for db-governance v0.4.0."""
 
+import json
 from pathlib import Path
 import sys
 from typing import Annotated, Optional
@@ -10,32 +11,154 @@ from db_governance.ddl_manage import create_migration_file, get_next_migration_v
 from db_governance.dictionary import load_dictionary, validate_dictionary_standards
 from db_governance.diff import build_effective_schema, compare_table_specs, render_diff_text
 from db_governance.discovery import discover_artifacts
+from db_governance.errors import GovernanceError
+from db_governance.history import (
+    list_history_events,
+    record_history_event,
+    show_history_event,
+    verify_history_events,
+)
+from db_governance.impact import analyze_impact, render_impact_json, render_impact_text
+from db_governance.migration_context import (
+    gather_migration_context,
+    render_migration_context_text,
+)
 from db_governance.edit_spec import (
     add_column_to_doc,
     modify_column_in_doc,
     remove_column_from_doc,
 )
-from db_governance.errors import GovernanceError
-from db_governance.generate_ddl import generate_ddl_script
-from db_governance.git_changes import resolve_changed_files
-from db_governance.impact import analyze_impact, render_impact_json, render_impact_text
-from db_governance.models import AgentType, AuditReport, ChangeType, Finding, Severity
+from db_governance.models import AgentType, ChangeType, ProjectProfile, Severity
 from db_governance.render import parse_project_tables, render_dbml, render_mermaid_erd
-from db_governance.report import render_json, render_text, write_evidence
+from db_governance.report import render_json, render_text, write_evidence_file
+from db_governance.runner import run_audit_check
 from db_governance.scaffold import generate_scaffold, parse_column_args
-from db_governance.rules import evaluate_required_artifacts, evaluate_rules
-from db_governance.runner import run_validators
-from db_governance.templates import render_candidate_profile
+from db_governance.skill_installer import install_skill_to_agent
 
 app = typer.Typer(
     name="dbg",
-    help="DB Governance CLI for contract synchronization, validator execution, and report generation.",
+    help="DB Governance CLI for contract synchronization, schema history, and context audit.",
     no_args_is_help=True,
 )
 
+edit_spec_app = typer.Typer(
+    name="edit-spec",
+    help="CLI table markdown specification document editor.",
+    no_args_is_help=True,
+)
+app.add_typer(edit_spec_app, name="edit-spec")
+
+
+def _find_table_doc_path(project_root: Path, profile: ProjectProfile, table_name: str) -> Path:
+    artifacts = discover_artifacts(project_root, profile)
+    table_docs = artifacts.get("table-docs", [])
+    table_upper = table_name.upper()
+    for rel_p in table_docs:
+        p = project_root / rel_p
+        if p.stem.upper() == table_upper:
+            return p
+    return project_root / "database" / "tables" / f"{table_upper}.md"
+
+
+@edit_spec_app.command("add-column")
+def edit_spec_add_column(
+    table: Annotated[str, typer.Option("--table", "-t", help="Target table name")],
+    name: Annotated[str, typer.Option("--name", "-n", help="Column name")],
+    type: Annotated[str, typer.Option("--type", help="Column data type")] = "VARCHAR(255)",
+    desc: Annotated[str, typer.Option("--desc", help="Column description")] = "",
+    pk: Annotated[bool, typer.Option("--pk", help="Is primary key")] = False,
+    nullable: Annotated[bool, typer.Option("--nullable", help="Is nullable")] = True,
+    write: Annotated[bool, typer.Option("--write", "-w", help="Write changes to file")] = False,
+    project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
+    profile: Annotated[Optional[Path], typer.Option("--profile", help="Explicit profile path")] = None,
+) -> None:
+    """Adds a column to a table markdown specification document."""
+    try:
+        resolved_root = project.resolve()
+        _, prof, _ = load_profile(resolved_root, profile)
+        doc_path = _find_table_doc_path(resolved_root, prof, table)
+        updated_text, _ = add_column_to_doc(
+            doc_path=doc_path, col_name=name, col_type=type, col_desc=desc, is_pk=pk, is_nullable=nullable, write=write
+        )
+
+        if not write:
+            print("--- SPEC EDIT PREVIEW (use --write to save) ---")
+            print(updated_text)
+        else:
+            print(f"Successfully updated table specification at: {doc_path.relative_to(resolved_root)}")
+        sys.exit(0)
+    except Exception as exc:
+        _handle_error(exc)
+
+
+@edit_spec_app.command("modify-column")
+def edit_spec_modify_column(
+    table: Annotated[str, typer.Option("--table", "-t", help="Target table name")],
+    name: Annotated[str, typer.Option("--name", "-n", help="Target column name")],
+    type: Annotated[Optional[str], typer.Option("--type", help="New column data type")] = None,
+    desc: Annotated[Optional[str], typer.Option("--desc", help="New column description")] = None,
+    write: Annotated[bool, typer.Option("--write", "-w", help="Write changes to file")] = False,
+    project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
+    profile: Annotated[Optional[Path], typer.Option("--profile", help="Explicit profile path")] = None,
+) -> None:
+    """Modifies an existing column in a table markdown specification document."""
+    try:
+        resolved_root = project.resolve()
+        _, prof, _ = load_profile(resolved_root, profile)
+        doc_path = _find_table_doc_path(resolved_root, prof, table)
+        updated_text, _ = modify_column_in_doc(
+            doc_path=doc_path, col_name=name, col_type=type, col_desc=desc, write=write
+        )
+
+        if not write:
+            print("--- SPEC EDIT PREVIEW (use --write to save) ---")
+            print(updated_text)
+        else:
+            print(f"Successfully updated table specification at: {doc_path.relative_to(resolved_root)}")
+        sys.exit(0)
+    except Exception as exc:
+        _handle_error(exc)
+
+
+@edit_spec_app.command("remove-column")
+def edit_spec_remove_column(
+    table: Annotated[str, typer.Option("--table", "-t", help="Target table name")],
+    name: Annotated[str, typer.Option("--name", "-n", help="Target column name")],
+    write: Annotated[bool, typer.Option("--write", "-w", help="Write changes to file")] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Confirm destructive column deletion")] = False,
+    project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
+    profile: Annotated[Optional[Path], typer.Option("--profile", help="Explicit profile path")] = None,
+) -> None:
+    """Removes a column from a table markdown specification document."""
+    try:
+        if write and not yes:
+            raise GovernanceError(
+                "[DBG401] Destructive column deletion requires explicit confirmation (--yes / -y).",
+                exit_code=2,
+            )
+        resolved_root = project.resolve()
+        _, prof, _ = load_profile(resolved_root, profile)
+        doc_path = _find_table_doc_path(resolved_root, prof, table)
+        updated_text, _ = remove_column_from_doc(doc_path=doc_path, col_name=name, write=write, yes=yes)
+
+        if not write:
+            print("--- SPEC EDIT PREVIEW (use --write to save) ---")
+            print(updated_text)
+        else:
+            print(f"Successfully updated table specification at: {doc_path.relative_to(resolved_root)}")
+        sys.exit(0)
+    except Exception as exc:
+        _handle_error(exc)
+
+history_app = typer.Typer(
+    name="history",
+    help="Immutable semantic schema history event management commands.",
+    no_args_is_help=True,
+)
+app.add_typer(history_app, name="history")
+
 
 def _handle_error(exc: Exception) -> None:
-    """Prints error message and exits with appropriate code."""
     if isinstance(exc, GovernanceError):
         print(f"Error: {exc.message}", file=sys.stderr)
         sys.exit(exc.exit_code)
@@ -44,144 +167,53 @@ def _handle_error(exc: Exception) -> None:
         sys.exit(2)
 
 
-def _build_audit_report(
-    project: Path,
-    profile_path: Optional[Path],
-    base: Optional[str],
-    changed_files_opt: Optional[list[Path]],
-    change_type: ChangeType,
-    run_validators_flag: bool,
-    eval_rules: bool = True,
-) -> AuditReport:
-    resolved_root = project.resolve()
-    target_prof_path, profile, prof_hash = load_profile(resolved_root, profile_path)
-    artifacts = discover_artifacts(resolved_root, profile)
-
-    findings: list[Finding] = []
-
-    # Required artifact group check
-    findings.extend(evaluate_required_artifacts(profile, artifacts))
-
-    # Git / explicit changes
-    changed_files = resolve_changed_files(resolved_root, base, changed_files_opt or [])
-
-    if eval_rules:
-        findings.extend(evaluate_rules(profile, changed_files, change_type))
-
-    validators_results = []
-    if run_validators_flag and profile.validators:
-        val_results, val_findings = run_validators(resolved_root, profile.validators)
-        validators_results.extend(val_results)
-        findings.extend(val_findings)
-
-    has_error_findings = any(f.severity == Severity.ERROR for f in findings)
-    doc_state = "findings_detected" if has_error_findings else "clean"
-
-    return AuditReport(
-        schema_version=1,
-        project_name=profile.name,
-        project_root=str(resolved_root),
-        profile_path=str(target_prof_path),
-        profile_hash=prof_hash,
-        change_type=change_type,
-        changed_files=changed_files,
-        artifacts=artifacts,
-        findings=findings,
-        validators=validators_results,
-        documentation_state=doc_state,
-        live_database_state="not_checked",
-    )
-
-
-@app.command()
-def doctor(
-    project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
-    format: Annotated[str, typer.Option("--format", "-f", help="Output format (text|json)")] = "text",
-) -> None:
-    """Checks system environment, project path, and profile presence."""
-    try:
-        resolved_root = project.resolve()
-        prof_path, profile, prof_hash = load_profile(resolved_root, None)
-        artifacts = discover_artifacts(resolved_root, profile)
-
-        report = AuditReport(
-            schema_version=1,
-            project_name=profile.name,
-            project_root=str(resolved_root),
-            profile_path=str(prof_path),
-            profile_hash=prof_hash,
-            change_type=ChangeType.UNKNOWN,
-            changed_files=[],
-            artifacts=artifacts,
-            findings=[],
-            validators=[],
-            documentation_state="clean",
-            live_database_state="not_checked",
-        )
-
-        if format.lower() == "json":
-            print(render_json(report))
-        else:
-            print(render_text(report))
-
-        sys.exit(0)
-    except Exception as exc:
-        _handle_error(exc)
-
-
-@app.command()
-def init(
-    project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
-    template: Annotated[Optional[Path], typer.Option("--template", "-t", help="External TOML template path")] = None,
-    write: Annotated[bool, typer.Option("--write", "-w", help="Write candidate profile to disk")] = False,
-) -> None:
-    """Initializes or previews candidate .db-governance.toml profile."""
-    try:
-        resolved_root = project.resolve()
-        candidate = render_candidate_profile(resolved_root, template)
-
-        if not write:
-            print(candidate)
-            sys.exit(0)
-
-        target = (resolved_root / ".db-governance.toml").resolve()
-        if target.exists():
-            raise GovernanceError(
-                "[DBG002] .db-governance.toml already exists. Refusing to overwrite.", exit_code=2
-            )
-
-        target.write_text(candidate, encoding="utf-8")
-        print(f"Successfully created {target}")
-        sys.exit(0)
-    except Exception as exc:
-        _handle_error(exc)
-
-
 @app.command()
 def inspect(
     project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
     profile: Annotated[Optional[Path], typer.Option("--profile", help="Explicit profile path")] = None,
     format: Annotated[str, typer.Option("--format", "-f", help="Output format (text|json)")] = "text",
 ) -> None:
-    """Inventories matched and missing artifacts without evaluating change rules."""
+    """Discovers project artifacts, profile rules, and project-local validators."""
     try:
-        report = _build_audit_report(
-            project=project,
-            profile_path=profile,
-            base=None,
-            changed_files_opt=None,
-            change_type=ChangeType.UNKNOWN,
-            run_validators_flag=False,
-            eval_rules=False,
-        )
+        resolved_root = project.resolve()
+        profile_path, prof, prof_hash = load_profile(resolved_root, profile)
+        artifacts = discover_artifacts(resolved_root, prof)
 
         if format.lower() == "json":
-            print(render_json(report))
+            out = {
+                "project_name": prof.name,
+                "project_root": str(resolved_root),
+                "profile_path": str(profile_path),
+                "profile_hash": prof_hash,
+                "artifacts": artifacts,
+                "rules": [r.model_dump() for r in prof.rules],
+                "validators": [v.model_dump() for v in prof.validators],
+            }
+            print(json.dumps(out, indent=2))
         else:
-            print(render_text(report))
-
-        has_errors = any(f.severity == Severity.ERROR for f in report.findings)
-        sys.exit(1 if has_errors else 0)
+            print("==================================================")
+            print("         DATABASE GOVERNANCE INSPECTION           ")
+            print("==================================================")
+            print(f"Project Name : {prof.name}")
+            print(f"Project Root : {resolved_root}")
+            print(f"Profile Path : {profile_path}")
+            print(f"Profile Hash : {prof_hash}")
+            print("--------------------------------------------------")
+            print("Discovered Artifact Groups:")
+            for group, files in artifacts.items():
+                print(f"  [{group}] ({len(files)} files)")
+                for f in files:
+                    print(f"    - {f}")
+            print("--------------------------------------------------")
+            print(f"Configured Rules ({len(prof.rules)}):")
+            for r in prof.rules:
+                print(f"  - {r.id}: {r.description}")
+            print("--------------------------------------------------")
+            print(f"Configured Validators ({len(prof.validators)}):")
+            for v in prof.validators:
+                print(f"  - {v.name}: {' '.join(v.argv)}")
+            print("==================================================")
+        sys.exit(0)
     except Exception as exc:
         _handle_error(exc)
 
@@ -190,221 +222,74 @@ def inspect(
 def check(
     project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
     profile: Annotated[Optional[Path], typer.Option("--profile", help="Explicit profile path")] = None,
-    base: Annotated[Optional[str], typer.Option("--base", "-b", help="Git base ref to compare against")] = None,
-    changed_file: Annotated[
-        Optional[list[Path]], typer.Option("--changed-file", help="Explicit changed file path")
-    ] = None,
-    change_type: Annotated[ChangeType, typer.Option("--change-type", help="Change classification")] = ChangeType.UNKNOWN,
+    base: Annotated[Optional[str], typer.Option("--base", help="Git base reference for change calculation")] = None,
+    change_type: Annotated[
+        ChangeType, typer.Option("--change-type", help="Explicit change type override")
+    ] = ChangeType.UNKNOWN,
     run_project_validators: Annotated[
-        bool, typer.Option("--run-project-validators", help="Execute profile configured project validators")
+        bool, typer.Option("--run-project-validators", help="Execute project-local validators")
     ] = False,
     format: Annotated[str, typer.Option("--format", "-f", help="Output format (text|json)")] = "text",
+    evidence: Annotated[Optional[Path], typer.Option("--evidence", help="Path to write evidence JSON report")] = None,
 ) -> None:
-    """Evaluates synchronization rules and optional project validators."""
+    """Audits contract synchronization rules and runs project-local validators."""
     try:
-        report = _build_audit_report(
-            project=project,
+        report = run_audit_check(
+            project_root=project,
             profile_path=profile,
-            base=base,
-            changed_files_opt=changed_file,
-            change_type=change_type,
+            base_ref=base,
+            change_type_override=change_type,
             run_validators_flag=run_project_validators,
-            eval_rules=True,
         )
+
+        if evidence is not None:
+            write_evidence_file(report, evidence)
 
         if format.lower() == "json":
             print(render_json(report))
         else:
             print(render_text(report))
 
-        has_errors = any(f.severity == Severity.ERROR for f in report.findings)
-        sys.exit(1 if has_errors else 0)
+        sys.exit(1 if report.documentation_state != "clean" else 0)
     except Exception as exc:
         _handle_error(exc)
-
-
-@app.command()
-def evidence(
-    output: Annotated[Path, typer.Option("--output", "-o", help="Output directory for evidence bundle")],
-    project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
-    profile: Annotated[Optional[Path], typer.Option("--profile", help="Explicit profile path")] = None,
-    base: Annotated[Optional[str], typer.Option("--base", "-b", help="Git base ref to compare against")] = None,
-    changed_file: Annotated[
-        Optional[list[Path]], typer.Option("--changed-file", help="Explicit changed file path")
-    ] = None,
-    change_type: Annotated[ChangeType, typer.Option("--change-type", help="Change classification")] = ChangeType.UNKNOWN,
-    run_project_validators: Annotated[
-        bool, typer.Option("--run-project-validators", help="Execute profile configured project validators")
-    ] = False,
-    overwrite: Annotated[bool, typer.Option("--overwrite", help="Overwrite existing evidence files")] = False,
-) -> None:
-    """Evaluates synchronization rules and outputs evidence bundle (report.json & report.md)."""
-    try:
-        report = _build_audit_report(
-            project=project,
-            profile_path=profile,
-            base=base,
-            changed_files_opt=changed_file,
-            change_type=change_type,
-            run_validators_flag=run_project_validators,
-            eval_rules=True,
-        )
-
-        write_evidence(report, output, overwrite=overwrite)
-        print(f"Evidence bundle successfully written to {output.resolve()}")
-
-        has_errors = any(f.severity == Severity.ERROR for f in report.findings)
-        sys.exit(1 if has_errors else 0)
-    except Exception as exc:
-        _handle_error(exc)
-
-
-def _do_install_skill(
-    agent: AgentType,
-    project: Optional[Path],
-    target_dir: Optional[Path],
-    symlink: bool,
-    overwrite: bool,
-) -> None:
-    import shutil
-
-    try:
-        home = Path.home()
-        dests: list[Path] = []
-
-        if target_dir is not None:
-            dests.append(target_dir.resolve())
-        elif project is not None:
-            dests.append((project.resolve() / ".skills" / "database-governance").resolve())
-        else:
-            if agent in (AgentType.GEMINI, AgentType.ALL):
-                dests.append((home / ".gemini" / "config" / "skills" / "database-governance").resolve())
-            if agent in (AgentType.CODEX, AgentType.ALL):
-                dests.append((home / ".codex" / "skills" / "database-governance").resolve())
-            if agent in (AgentType.CLAUDE, AgentType.ALL):
-                dests.append((home / ".claude" / "skills" / "database-governance").resolve())
-
-        # Locate skill directory in package resources or repo
-        cand1 = (Path(__file__).parent / "skills" / "database-governance").resolve()
-        cand2 = (Path(__file__).parent.parent.parent / "skills" / "database-governance").resolve()
-        cand3 = (Path.cwd() / "skills" / "database-governance").resolve()
-
-        src_skill = None
-        for cand in [cand1, cand2, cand3]:
-            if cand.exists() and (cand / "SKILL.md").exists():
-                src_skill = cand
-                break
-
-        if src_skill is None:
-            raise GovernanceError(
-                f"[DBG001] Source skill directory not found in package resources ({cand1}) or repo ({cand2}).",
-                exit_code=2,
-            )
-
-        for dest in dests:
-            if dest.exists() and not overwrite:
-                raise GovernanceError(
-                    f"[DBG401] Skill destination directory '{dest}' already exists. Use --overwrite to replace.",
-                    exit_code=2,
-                )
-
-            if dest.exists() or dest.is_symlink():
-                if dest.is_symlink() or dest.is_file():
-                    dest.unlink()
-                else:
-                    shutil.rmtree(dest)
-
-            dest.parent.mkdir(parents=True, exist_ok=True)
-
-            if symlink:
-                dest.symlink_to(src_skill, target_is_directory=True)
-                print(f"Successfully symlinked database-governance skill -> {dest}")
-            else:
-                shutil.copytree(src_skill, dest)
-                print(f"Successfully installed database-governance skill to {dest}")
-
-        sys.exit(0)
-    except Exception as exc:
-        _handle_error(exc)
-
-
-@app.command("install-skill")
-def install_skill(
-    agent: Annotated[
-        AgentType, typer.Argument(help="Target AI agent environment (gemini|codex|claude|all)")
-    ] = AgentType.GEMINI,
-    project: Annotated[
-        Optional[Path],
-        typer.Option("--project", "-p", help="Install into project-local .skills/database-governance directory"),
-    ] = None,
-    target_dir: Annotated[
-        Optional[Path],
-        typer.Option("--target-dir", "-t", help="Explicit target skills directory path"),
-    ] = None,
-    symlink: Annotated[
-        bool, typer.Option("--symlink", "-s", help="Create symlink instead of copying files")
-    ] = False,
-    overwrite: Annotated[
-        bool, typer.Option("--overwrite", help="Overwrite existing skill directory")
-    ] = False,
-) -> None:
-    """Installs database-governance skill into Antigravity/Codex/Claude agent or project-local directory."""
-    _do_install_skill(agent, project, target_dir, symlink, overwrite)
-
-
-@app.command("init-skill")
-def init_skill(
-    agent: Annotated[
-        AgentType, typer.Argument(help="Target AI agent environment (gemini|codex|claude|all)")
-    ] = AgentType.GEMINI,
-    project: Annotated[
-        Optional[Path],
-        typer.Option("--project", "-p", help="Install into project-local .skills/database-governance directory"),
-    ] = None,
-    target_dir: Annotated[
-        Optional[Path],
-        typer.Option("--target-dir", "-t", help="Explicit target skills directory path"),
-    ] = None,
-    symlink: Annotated[
-        bool, typer.Option("--symlink", "-s", help="Create symlink instead of copying files")
-    ] = False,
-    overwrite: Annotated[
-        bool, typer.Option("--overwrite", help="Overwrite existing skill directory")
-    ] = False,
-) -> None:
-    """Alias for install-skill. Initializes database-governance skill."""
-    _do_install_skill(agent, project, target_dir, symlink, overwrite)
-
 
 
 @app.command()
 def render(
     project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
     profile: Annotated[Optional[Path], typer.Option("--profile", help="Explicit profile path")] = None,
-    format: Annotated[str, typer.Option("--format", "-f", help="Diagram format (mermaid|dbml)")] = "mermaid",
-    output: Annotated[Optional[Path], typer.Option("--output", "-o", help="Output file path")] = None,
+    format: Annotated[str, typer.Option("--format", "-f", help="Render format (mermaid|dbml)")] = "mermaid",
+    output: Annotated[Optional[Path], typer.Option("--output", "-o", help="Write rendered output to file")] = None,
+    overwrite: Annotated[bool, typer.Option("--overwrite", help="Overwrite existing output file")] = False,
 ) -> None:
-    """Renders Mermaid ERD or DBML diagram from discovered table specifications."""
+    """Renders Mermaid ERD or DBML schema diagrams from table specification documents."""
     try:
         resolved_root = project.resolve()
         _, prof, _ = load_profile(resolved_root, profile)
         artifacts = discover_artifacts(resolved_root, prof)
+        tables = parse_project_tables(resolved_root, artifacts, adapter=prof.table_spec_adapter)
 
-        tables = parse_project_tables(resolved_root, artifacts)
-
-        fmt_lower = format.lower()
-        if fmt_lower == "dbml":
+        if format.lower() == "dbml":
             rendered = render_dbml(tables)
         else:
             rendered = render_mermaid_erd(tables)
 
-        if output is None:
-            print(rendered)
-        else:
+        if output is not None:
             out_path = output.resolve()
-            out_path.parent.mkdir(parents=True, exist_ok=True)
+            if out_path.exists() and not overwrite:
+                raise GovernanceError(
+                    f"[DBG401] Output file already exists: {out_path}. Use --overwrite to replace.",
+                    exit_code=2,
+                )
             out_path.write_text(rendered, encoding="utf-8")
-            print(f"Diagram successfully written to {out_path}")
+            try:
+                rel_disp = out_path.relative_to(resolved_root)
+            except ValueError:
+                rel_disp = out_path
+            print(f"Successfully rendered schema to: {rel_disp}")
+        else:
+            print(rendered)
 
         sys.exit(0)
     except Exception as exc:
@@ -415,220 +300,82 @@ def render(
 def dictionary(
     project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
     profile: Annotated[Optional[Path], typer.Option("--profile", help="Explicit profile path")] = None,
-    dictionary: Annotated[
-        Optional[Path], typer.Option("--dictionary", "-d", help="Explicit dictionary TOML path")
-    ] = None,
+    dictionary: Annotated[Optional[Path], typer.Option("--dictionary", help="Explicit dictionary TOML path")] = None,
     format: Annotated[str, typer.Option("--format", "-f", help="Output format (text|json)")] = "text",
 ) -> None:
-    """Validates discovered table specifications against data dictionary standards."""
+    """Validates table specifications against configured data dictionary standards."""
     try:
         resolved_root = project.resolve()
-        target_prof_path, prof, prof_hash = load_profile(resolved_root, profile)
+        _, prof, _ = load_profile(resolved_root, profile)
+        dict_path = dictionary.resolve() if dictionary else resolved_root / ".db-governance" / "dictionary.toml"
+        dict_prof = load_dictionary(dict_path)
+
         artifacts = discover_artifacts(resolved_root, prof)
-
-        tables = parse_project_tables(resolved_root, artifacts)
-
-        dict_path = dictionary or (resolved_root / ".db-dictionary.toml")
-        if not dict_path.exists():
-            findings = []
-        else:
-            dict_prof = load_dictionary(dict_path)
-            findings = validate_dictionary_standards(tables, dict_prof)
-
-        has_errors = any(f.severity == Severity.ERROR for f in findings)
-        doc_state = "findings_detected" if has_errors else "clean"
-
-        report = AuditReport(
-            schema_version=1,
-            project_name=prof.name,
-            project_root=str(resolved_root),
-            profile_path=str(target_prof_path),
-            profile_hash=prof_hash,
-            change_type=ChangeType.UNKNOWN,
-            changed_files=[],
-            artifacts=artifacts,
-            findings=findings,
-            validators=[],
-            documentation_state=doc_state,
-            live_database_state="not_checked",
-        )
+        tables = parse_project_tables(resolved_root, artifacts, adapter=prof.table_spec_adapter)
+        findings = validate_dictionary_standards(tables, dict_prof)
 
         if format.lower() == "json":
-            print(render_json(report))
+            print(json.dumps([f.model_dump() for f in findings], indent=2))
         else:
-            print(render_text(report))
+            if not findings:
+                print("Verdict: PASS (Data dictionary standards verified 100%)")
+            else:
+                print(f"Dictionary Audit Failures ({len(findings)}):")
+                for f in findings:
+                    print(f"  - [{f.code}] {f.message}")
 
-        sys.exit(1 if has_errors else 0)
+        sys.exit(1 if findings else 0)
     except Exception as exc:
         _handle_error(exc)
 
 
 @app.command()
 def impact(
-    table: Annotated[str, typer.Option("--table", "-t", help="Target table name for impact analysis")],
-    column: Annotated[Optional[str], typer.Option("--column", "-c", help="Optional target column name")] = None,
+    table: Annotated[str, typer.Option("--table", "-t", help="Target table name for lineage search")],
+    column: Annotated[Optional[str], typer.Option("--column", "-c", help="Target column name")] = None,
     project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
     profile: Annotated[Optional[Path], typer.Option("--profile", help="Explicit profile path")] = None,
     format: Annotated[str, typer.Option("--format", "-f", help="Output format (text|json)")] = "text",
 ) -> None:
-    """Analyzes downstream file dependencies and impact when a table or column changes."""
+    """Analyzes downstream lineage and artifact impacts for a target table or column."""
     try:
         resolved_root = project.resolve()
         _, prof, _ = load_profile(resolved_root, profile)
         artifacts = discover_artifacts(resolved_root, prof)
 
-        report = analyze_impact(resolved_root, artifacts, table=table, column=column)
+        impact_data = analyze_impact(resolved_root, artifacts, table, column)
 
         if format.lower() == "json":
-            print(render_impact_json(report))
+            print(render_impact_json(impact_data))
         else:
-            print(render_impact_text(report))
+            print(render_impact_text(impact_data))
 
         sys.exit(0)
     except Exception as exc:
         _handle_error(exc)
 
 
-@app.command("generate-spec")
-def generate_spec(
-    table: Annotated[str, typer.Option("--table", "-t", help="Table name to scaffold")],
-    columns: Annotated[
-        Optional[str], typer.Option("--columns", "-c", help="Columns spec (e.g. 'id:BIGINT,name:VARCHAR(100)')")
-    ] = None,
-    project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
-    profile: Annotated[Optional[Path], typer.Option("--profile", help="Explicit profile path")] = None,
-    write: Annotated[bool, typer.Option("--write", "-w", help="Write scaffold files to disk")] = False,
+@app.command("init-skill")
+@app.command("install-skill")
+def init_skill(
+    agent: Annotated[AgentType, typer.Argument(help="Target agent type (gemini|codex|claude|all)")] = AgentType.ALL,
+    project: Annotated[Optional[Path], typer.Option("--project", "-p", help="Install into project-local .skills directory")] = None,
+    overwrite: Annotated[bool, typer.Option("--overwrite", help="Overwrite existing skill installation")] = False,
+    symlink: Annotated[bool, typer.Option("--symlink", help="Create symlink instead of copying files")] = False,
 ) -> None:
-    """Generates table markdown specification and DDL migration template scaffolding."""
+    """Installs database-governance and database-migration-design skills for AI agent environments."""
     try:
-        resolved_root = project.resolve()
-        _, prof, _ = load_profile(resolved_root, profile)
-
-        cols = parse_column_args(columns)
-        doc_text, ddl_text, written = generate_scaffold(
-            resolved_root, prof, table_name=table, columns=cols, write=write
-        )
-
-        if not write:
-            print("==================================================")
-            print(f"       TABLE SPEC SCAFFOLD ({table.upper()})       ")
-            print("==================================================")
-            print(doc_text)
-            print("\n--------------------------------------------------")
-            print("                DDL SQL SCAFFOLD                  ")
-            print("--------------------------------------------------")
-            print(ddl_text)
-            print("==================================================")
+        if project is not None:
+            dest = install_skill_to_agent("project", project_root=project, overwrite=overwrite, symlink=symlink)
+            print(f"Successfully installed skills to {dest}")
         else:
-            print("Successfully written scaffold files:")
-            for p in written:
-                print(f"  - {p}")
-
-        sys.exit(0)
-    except Exception as exc:
-        _handle_error(exc)
-
-
-edit_spec_app = typer.Typer(
-    name="edit-spec",
-    help="Edits existing table markdown specification documents directly via CLI.",
-    no_args_is_help=True,
-)
-app.add_typer(edit_spec_app, name="edit-spec")
-
-
-def _find_table_doc_path(project_root: Path, profile_path: Optional[Path], table_name: str) -> Path:
-    target_prof_path, prof, _ = load_profile(project_root, profile_path)
-    artifacts = discover_artifacts(project_root, prof)
-
-    table_upper = table_name.upper()
-    for group_name, path_list in artifacts.items():
-        for rel_path in path_list:
-            p = project_root / rel_path
-            if table_upper == p.stem.upper() or table_upper in p.stem.upper():
-                return p
-
-    raise GovernanceError(
-        f"[DBG003] Table document for '{table_name}' not found in project artifacts.",
-        exit_code=2,
-    )
-
-
-@edit_spec_app.command("add-column")
-def edit_spec_add_column(
-    table: Annotated[str, typer.Option("--table", "-t", help="Target table name")],
-    name: Annotated[str, typer.Option("--name", "-n", help="Column name to add")],
-    type: Annotated[str, typer.Option("--type", help="Data type")],
-    desc: Annotated[str, typer.Option("--desc", help="Column description")] = "",
-    pk: Annotated[bool, typer.Option("--pk", help="Is primary key")] = False,
-    write: Annotated[bool, typer.Option("--write", "-w", help="Write changes to disk (default: dry-run)")] = False,
-    project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
-    profile: Annotated[Optional[Path], typer.Option("--profile", help="Explicit profile path")] = None,
-) -> None:
-    """Appends a new column to markdown table spec (default is dry-run preview)."""
-    try:
-        resolved_root = project.resolve()
-        doc_path = _find_table_doc_path(resolved_root, profile, table)
-        out_text, written = add_column_to_doc(
-            doc_path, col_name=name, col_type=type, col_desc=desc, is_pk=pk, write=write
-        )
-        if not written:
-            print("--- DRY-RUN PREVIEW (use --write to save) ---")
-            print(out_text)
-        else:
-            print(f"Successfully added column '{name}' to '{doc_path.relative_to(resolved_root)}'")
-            print("Recommended next step: run 'dbg check' to verify contract synchronization.")
-        sys.exit(0)
-    except Exception as exc:
-        _handle_error(exc)
-
-
-@edit_spec_app.command("modify-column")
-def edit_spec_modify_column(
-    table: Annotated[str, typer.Option("--table", "-t", help="Target table name")],
-    name: Annotated[str, typer.Option("--name", "-n", help="Column name to modify")],
-    type: Annotated[Optional[str], typer.Option("--type", help="New data type")] = None,
-    desc: Annotated[Optional[str], typer.Option("--desc", help="New column description")] = None,
-    write: Annotated[bool, typer.Option("--write", "-w", help="Write changes to disk (default: dry-run)")] = False,
-    project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
-    profile: Annotated[Optional[Path], typer.Option("--profile", help="Explicit profile path")] = None,
-) -> None:
-    """Modifies data type or description for an existing column in markdown table spec."""
-    try:
-        resolved_root = project.resolve()
-        doc_path = _find_table_doc_path(resolved_root, profile, table)
-        out_text, written = modify_column_in_doc(doc_path, col_name=name, col_type=type, col_desc=desc, write=write)
-        if not written:
-            print("--- DRY-RUN PREVIEW (use --write to save) ---")
-            print(out_text)
-        else:
-            print(f"Successfully modified column '{name}' in '{doc_path.relative_to(resolved_root)}'")
-            print("Recommended next step: run 'dbg check' to verify contract synchronization.")
-        sys.exit(0)
-    except Exception as exc:
-        _handle_error(exc)
-
-
-@edit_spec_app.command("remove-column")
-def edit_spec_remove_column(
-    table: Annotated[str, typer.Option("--table", "-t", help="Target table name")],
-    name: Annotated[str, typer.Option("--name", "-n", help="Column name to remove")],
-    write: Annotated[bool, typer.Option("--write", "-w", help="Write changes to disk (default: dry-run)")] = False,
-    yes: Annotated[bool, typer.Option("--yes", "-y", help="Confirm deletion when combined with --write")] = False,
-    project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
-    profile: Annotated[Optional[Path], typer.Option("--profile", help="Explicit profile path")] = None,
-) -> None:
-    """Removes an existing column from markdown table spec (requires --write --yes to save)."""
-    try:
-        resolved_root = project.resolve()
-        doc_path = _find_table_doc_path(resolved_root, profile, table)
-        out_text, written = remove_column_from_doc(doc_path, col_name=name, write=write, yes=yes)
-        if not written:
-            print("--- DRY-RUN PREVIEW (use --write --yes to save) ---")
-            print(out_text)
-        else:
-            print(f"Successfully removed column '{name}' from '{doc_path.relative_to(resolved_root)}'")
-            print("Recommended next step: run 'dbg check' to verify contract synchronization.")
+            if agent == AgentType.ALL:
+                for target_agent in (AgentType.GEMINI, AgentType.CODEX, AgentType.CLAUDE):
+                    dest = install_skill_to_agent(target_agent.value, overwrite=overwrite, symlink=symlink)
+                    print(f"Successfully installed skills to {dest}")
+            else:
+                dest = install_skill_to_agent(agent.value, overwrite=overwrite, symlink=symlink)
+                print(f"Successfully installed skills to {dest}")
         sys.exit(0)
     except Exception as exc:
         _handle_error(exc)
@@ -637,13 +384,13 @@ def edit_spec_remove_column(
 @app.command("ddl-manage")
 def ddl_manage(
     next_version: Annotated[bool, typer.Option("--next-version", help="Preview next migration version")] = False,
-    create: Annotated[bool, typer.Option("--create", help="Create new migration file scaffold")] = False,
+    create: Annotated[bool, typer.Option("--create", help="Create new empty migration file scaffold")] = False,
     slug: Annotated[Optional[str], typer.Option("--slug", help="Slug name for new migration file")] = None,
-    series: Annotated[str, typer.Option("--series", help="Version series (main|stg)")] = "main",
+    series: Annotated[str, typer.Option("--series", help="Version series name (e.g. main, stg)")] = "main",
     project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
     profile: Annotated[Optional[Path], typer.Option("--profile", help="Explicit profile path")] = None,
 ) -> None:
-    """Manages DDL migration version series and scaffolds new migration files."""
+    """Manages DDL migration version series and scaffolds empty migration files."""
     try:
         resolved_root = project.resolve()
         _, prof, _ = load_profile(resolved_root, profile)
@@ -652,7 +399,7 @@ def ddl_manage(
             if not slug:
                 raise GovernanceError("[DBG003] Slug name (--slug) is required when using --create.", exit_code=2)
             created_file = create_migration_file(resolved_root, prof, slug=slug, series_name=series)
-            print(f"Successfully created migration file: {created_file.relative_to(resolved_root)}")
+            print(f"Successfully created migration file scaffold: {created_file.relative_to(resolved_root)}")
         else:
             ver_str, mig_dir = get_next_migration_version(resolved_root, prof, series_name=series)
             print(f"Next Migration Version: {ver_str} (Target Directory: {mig_dir.relative_to(resolved_root)})")
@@ -669,13 +416,13 @@ def diff(
     profile: Annotated[Optional[Path], typer.Option("--profile", help="Explicit profile path")] = None,
     format: Annotated[str, typer.Option("--format", "-f", help="Output format (text|json)")] = "text",
 ) -> None:
-    """Compares table markdown specification 1:1 against effective DDL schema chain."""
+    """Compares table markdown specification 1:1 against effective schema chain."""
     try:
         resolved_root = project.resolve()
         _, prof, _ = load_profile(resolved_root, profile)
         artifacts = discover_artifacts(resolved_root, prof)
 
-        tables = parse_project_tables(resolved_root, artifacts)
+        tables = parse_project_tables(resolved_root, artifacts, adapter=prof.table_spec_adapter)
         doc_table = next(
             (t for t in tables if table.upper() == t.name.upper() or table.upper() in t.name.upper()), None
         )
@@ -686,8 +433,6 @@ def diff(
         findings = compare_table_specs(doc_table, ddl_table)
 
         if format.lower() == "json":
-            import json
-
             print(json.dumps([f.model_dump() for f in findings], indent=2))
         else:
             print(render_diff_text(table, findings))
@@ -697,44 +442,220 @@ def diff(
         _handle_error(exc)
 
 
-@app.command("generate-ddl")
-def generate_ddl_cmd(
-    table: Annotated[str, typer.Option("--table", "-t", help="Target table name for DDL generation")],
-    base: Annotated[Optional[str], typer.Option("--base", help="Git reference to compute schema delta")] = None,
-    dialect: Annotated[str, typer.Option("--dialect", help="SQL Dialect (postgres only in v0.3.0)")] = "postgres",
+@app.command("migration-context")
+def migration_context_cmd(
+    table: Annotated[str, typer.Option("--table", "-t", help="Target table name for migration context")],
+    base: Annotated[str, typer.Option("--base", help="Git base reference")] = "origin/main",
     project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
     profile: Annotated[Optional[Path], typer.Option("--profile", help="Explicit profile path")] = None,
-    write: Annotated[bool, typer.Option("--write", "-w", help="Write DDL script into next migration file")] = False,
-    force: Annotated[bool, typer.Option("--force", "-f", help="Bypass diff safety checks when using --write")] = False,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format (text|json)")] = "text",
 ) -> None:
-    """Generates PostgreSQL DDL migration SQL script from markdown table spec."""
+    """Gathers structured migration context evidence for AI agent consumption."""
     try:
         resolved_root = project.resolve()
         _, prof, _ = load_profile(resolved_root, profile)
+        report = gather_migration_context(resolved_root, prof, table_name=table, base_ref=base)
 
-        ddl_sql, written_path = generate_ddl_script(
-            resolved_root, prof, table_name=table, base_ref=base, dialect=dialect, write=write, force=force
-        )
-
-        if not write:
-            print("==================================================")
-            print(f"       POSTGRESQL DDL GENERATED ({table.upper()})  ")
-            print("==================================================")
-            print(ddl_sql)
-            print("==================================================")
+        if format.lower() == "json":
+            print(report.model_dump_json(indent=2))
         else:
-            if written_path:
-                print(f"Successfully written DDL migration to: {written_path.relative_to(resolved_root)}")
+            print(render_migration_context_text(report))
 
         sys.exit(0)
     except Exception as exc:
         _handle_error(exc)
 
 
+@history_app.command("record")
+def history_record_cmd(
+    table: Annotated[Optional[str], typer.Option("--table", "-t", help="Target table name")] = None,
+    staged: Annotated[bool, typer.Option("--staged", help="Infer semantic changes from staged git files")] = False,
+    write: Annotated[bool, typer.Option("--write", "-w", help="Write immutable JSON event file")] = False,
+    project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
+    profile: Annotated[Optional[Path], typer.Option("--profile", help="Explicit profile path")] = None,
+) -> None:
+    """Previews or writes an immutable semantic history event JSON file."""
+    try:
+        resolved_root = project.resolve()
+        _, prof, _ = load_profile(resolved_root, profile)
+
+        if write:
+            check_report = run_audit_check(resolved_root, profile_path=profile)
+            if check_report.documentation_state != "clean":
+                raise GovernanceError(
+                    f"[DBG402] Cannot record history event: contract check has error findings ({len(check_report.findings)}). Run 'dbg check' to resolve.",
+                    exit_code=2,
+                )
+
+        event, written_path = record_history_event(resolved_root, prof, table_name=table, write=write)
+
+        if not write:
+            print("--- HISTORY EVENT PREVIEW (use --write to record) ---")
+            print(event.model_dump_json(indent=2))
+        else:
+            if written_path:
+                print(f"Successfully recorded history event to: {written_path.relative_to(resolved_root)}")
+
+        sys.exit(0)
+    except Exception as exc:
+        _handle_error(exc)
 
 
+@history_app.command("list")
+def history_list_cmd(
+    table: Annotated[Optional[str], typer.Option("--table", "-t", help="Filter history events by table")] = None,
+    project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
+    profile: Annotated[Optional[Path], typer.Option("--profile", help="Explicit profile path")] = None,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format (text|json)")] = "text",
+) -> None:
+    """Lists recorded history events in repository."""
+    try:
+        resolved_root = project.resolve()
+        _, prof, _ = load_profile(resolved_root, profile)
+        events = list_history_events(resolved_root, prof, table_name=table)
+
+        if format.lower() == "json":
+            print(json.dumps([e.model_dump() for e in events], indent=2))
+        else:
+            if not events:
+                print("No history events found.")
+            else:
+                print(f"Recorded History Events ({len(events)}):")
+                for e in events:
+                    print(f"  - [{e.event_id}] {e.recorded_at} | Table: {e.table} | Base: {e.base_commit}")
+
+        sys.exit(0)
+    except Exception as exc:
+        _handle_error(exc)
 
 
+@history_app.command("show")
+def history_show_cmd(
+    event_id: Annotated[str, typer.Argument(help="History Event ID (e.g. 01J...)")],
+    project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
+    profile: Annotated[Optional[Path], typer.Option("--profile", help="Explicit profile path")] = None,
+) -> None:
+    """Displays details of a specific history event."""
+    try:
+        resolved_root = project.resolve()
+        _, prof, _ = load_profile(resolved_root, profile)
+        event = show_history_event(resolved_root, prof, event_id=event_id)
+        print(event.model_dump_json(indent=2))
+        sys.exit(0)
+    except Exception as exc:
+        _handle_error(exc)
 
 
+@history_app.command("verify")
+def history_verify_cmd(
+    staged: Annotated[bool, typer.Option("--staged", help="Verify staged git changes")] = True,
+    project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
+    profile: Annotated[Optional[Path], typer.Option("--profile", help="Explicit profile path")] = None,
+) -> None:
+    """Verifies that staged semantic DB changes have matching history events."""
+    try:
+        resolved_root = project.resolve()
+        _, prof, _ = load_profile(resolved_root, profile)
+        findings = verify_history_events(resolved_root, prof, staged_only=staged)
+
+        if not findings:
+            print("Verdict: PASS (History event verification clean)")
+        else:
+            print(f"History Verification Failures ({len(findings)}):")
+            for f in findings:
+                print(f"  - [{f.code}] {f.message}")
+
+        sys.exit(1 if findings else 0)
+    except Exception as exc:
+        _handle_error(exc)
+
+
+@app.command()
+def init(
+    project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
+    write: Annotated[bool, typer.Option("--write", "-w", help="Write profile TOML file")] = False,
+) -> None:
+    """Initializes a new .db-governance.toml profile configuration."""
+    try:
+        resolved_root = project.resolve()
+        target_file = resolved_root / ".db-governance.toml"
+        content = """version = 1
+name = "default-project"
+
+[[artifact_groups]]
+name = "table-docs"
+role = "source"
+patterns = ["database/tables/*.md"]
+required = true
+
+[[artifact_groups]]
+name = "ddl-migrations"
+role = "migration"
+patterns = ["database/migrations/V*.sql"]
+required = true
+
+[[artifact_groups]]
+name = "changelog"
+role = "history"
+patterns = ["database/changelog.md"]
+required = true
+
+[[rules]]
+id = "DBG-RULE-001"
+description = "Table doc changes require migration and changelog updates."
+when_changed_any = ["database/tables/*.md"]
+applies_to = ["semantic", "unknown"]
+severity = "error"
+
+[[rules.require_changed]]
+label = "DDL migration"
+match_any = ["database/migrations/V*.sql"]
+
+[[rules.require_changed]]
+label = "change history"
+match_any = ["database/changelog.md"]
+
+[[migration_series]]
+name = "main"
+directory = "database/migrations"
+file_pattern = "V1_{number}__{slug}.sql"
+"""
+
+        if not write:
+            print("--- PROFILE INITIATION PREVIEW (use --write to save) ---")
+            print(content)
+        else:
+            if target_file.exists():
+                raise GovernanceError(f"[DBG401] Profile file already exists: {target_file}", exit_code=2)
+            target_file.write_text(content, encoding="utf-8")
+            print(f"Successfully initialized profile at: {target_file.relative_to(resolved_root)}")
+        sys.exit(0)
+    except Exception as exc:
+        _handle_error(exc)
+
+
+@app.command("generate-spec")
+def generate_spec_cmd(
+    table: Annotated[str, typer.Option("--table", "-t", help="Table name")],
+    columns: Annotated[Optional[str], typer.Option("--columns", "-c", help="Columns spec 'id:BIGINT,name:VARCHAR(100)'")] = None,
+    project: Annotated[Path, typer.Option("--project", "-p", help="Project root directory")] = Path("."),
+    profile: Annotated[Optional[Path], typer.Option("--profile", help="Explicit profile path")] = None,
+    write: Annotated[bool, typer.Option("--write", "-w", help="Write scaffold files to disk")] = False,
+) -> None:
+    """Generates table markdown specification and migration scaffold files."""
+    try:
+        resolved_root = project.resolve()
+        _, prof, _ = load_profile(resolved_root, profile)
+        parsed_cols = parse_column_args(columns)
+        doc_text, ddl_text, written = generate_scaffold(resolved_root, prof, table, parsed_cols, write=write)
+
+        if not write:
+            print("--- TABLE SPEC SCAFFOLD (use --write to save) ---")
+            print(doc_text)
+        else:
+            for p in written:
+                print(f"Successfully generated scaffold: {p.relative_to(resolved_root)}")
+        sys.exit(0)
+    except Exception as exc:
+        _handle_error(exc)
 

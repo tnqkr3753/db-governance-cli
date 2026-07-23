@@ -3,8 +3,7 @@
 import re
 from pathlib import Path
 
-from db_governance.discovery import discover_artifacts
-from db_governance.models import ArtifactRole, Finding, ProjectProfile, Severity
+from db_governance.models import Finding, ProjectProfile, Severity
 from db_governance.render import ColumnSpec, TableSpec
 
 
@@ -54,7 +53,6 @@ def _parse_sql_columns_from_statement(sql: str, table_name: str) -> list[ColumnS
                 col_name = parts[0].strip("`\"'")
                 rest_str = parts[1].strip()
 
-                # Match multi-word types like CHARACTER VARYING(30), TIMESTAMP WITHOUT TIME ZONE
                 type_match = re.match(
                     r"^((?:CHARACTER\s+VARYING|DOUBLE\s+PRECISION|TIMESTAMP\s+(?:WITHOUT|WITH)\s+TIME\s+ZONE|[^\s]+)(?:\s*\([^\)]+\))?)",
                     rest_str,
@@ -62,7 +60,6 @@ def _parse_sql_columns_from_statement(sql: str, table_name: str) -> list[ColumnS
                 )
                 if type_match:
                     raw_type = type_match.group(1).upper()
-                    # Normalize CHARACTER VARYING -> VARCHAR for parity comparison
                     col_type = re.sub(r"\bCHARACTER\s+VARYING\b", "VARCHAR", raw_type)
                     col_type = re.sub(r"\bTIMESTAMP\s+(?:WITHOUT|WITH)\s+TIME\s+ZONE\b", "TIMESTAMP", col_type)
 
@@ -82,16 +79,20 @@ def build_effective_schema(
 ) -> TableSpec:
     """Builds effective schema for table_name by applying ordered migration SQL chain."""
     resolved_root = project_root.resolve()
-    artifacts = discover_artifacts(resolved_root, profile)
 
-    mig_files: list[Path] = []
-    for group in profile.artifact_groups:
-        if group.role == ArtifactRole.MIGRATION:
-            for rel_p in artifacts.get(group.name, []):
-                p = resolved_root / rel_p
-                if p.suffix.lower() == ".sql":
-                    mig_files.append(p)
+    if profile.migration_series:
+        target_series = next((s for s in profile.migration_series if s.name.lower() == "main"), profile.migration_series[0])
+        mig_dir = (resolved_root / target_series.directory).resolve()
+    else:
+        mig_dir = resolved_root / "database" / "migrations"
+        for group in profile.artifact_groups:
+            if group.role.value == "migration" and group.patterns:
+                pat = group.patterns[0]
+                pat_dir = Path(pat.split("*")[0]).parent if "*" in pat else Path(pat).parent
+                mig_dir = (resolved_root / pat_dir).resolve()
+                break
 
+    mig_files: list[Path] = list(mig_dir.glob("*.sql")) if mig_dir.exists() else []
     mig_files.sort(key=lambda p: p.name)
 
     table_upper = table_name.upper()
@@ -103,12 +104,10 @@ def build_effective_schema(
         except Exception:
             continue
 
-        # Process CREATE TABLE
         parsed_cols = _parse_sql_columns_from_statement(sql_content, table_name)
         for c in parsed_cols:
             cols_dict[c.name.upper()] = c
 
-        # Process ALTER TABLE ADD COLUMN
         alter_pattern = re.compile(
             r"ALTER\s+TABLE\s+(?:[^\.\s]+\.)?([^\.\s\(\)]+)\s+ADD\s+(?:COLUMN\s+)?([^\s]+)\s+([^\s;,]+)",
             re.IGNORECASE,
@@ -127,10 +126,20 @@ def compare_table_specs(doc_table: TableSpec, ddl_table: TableSpec) -> list[Find
     """Compares Markdown document TableSpec against Effective DDL TableSpec."""
     findings: list[Finding] = []
 
+    if not doc_table.columns:
+        findings.append(
+            Finding(
+                code="DBG202",
+                severity=Severity.ERROR,
+                message=f"Table '{doc_table.name}': failed to parse columns unambiguously. Check table_spec_adapter configuration.",
+                paths=[],
+            )
+        )
+        return findings
+
     doc_cols = {c.name.upper(): c for c in doc_table.columns}
     ddl_cols = {c.name.upper(): c for c in ddl_table.columns}
 
-    # Check missing in DDL
     for name, c in doc_cols.items():
         if name not in ddl_cols:
             findings.append(
@@ -143,7 +152,6 @@ def compare_table_specs(doc_table: TableSpec, ddl_table: TableSpec) -> list[Find
             )
         else:
             ddl_c = ddl_cols[name]
-            # Check type mismatch
             doc_type_clean = c.data_type.upper().replace(" ", "")
             ddl_type_clean = ddl_c.data_type.upper().replace(" ", "")
             if doc_type_clean != ddl_type_clean:
@@ -156,7 +164,6 @@ def compare_table_specs(doc_table: TableSpec, ddl_table: TableSpec) -> list[Find
                     )
                 )
 
-    # Check missing in doc
     for name in ddl_cols:
         if name not in doc_cols:
             findings.append(

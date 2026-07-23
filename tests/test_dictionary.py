@@ -78,4 +78,4 @@ name = "std-dict"
     )
     # Should exit 0 because generic_clean uses USERS.md with id and name (no USER_NO)
     assert res.exit_code == 0
-    assert "clean" in res.output
+    assert "PASS" in res.output

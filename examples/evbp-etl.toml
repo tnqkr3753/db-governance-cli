@@ -71,12 +71,12 @@ cwd = "."
 timeout_seconds = 120
 max_output_bytes = 1048576
 
-[[version_series]]
+[[migration_series]]
 name = "main"
 directory = "데이터베이스/DDL"
-pattern = "V1_{N}__*.sql"
+file_pattern = "V1_{number}__{slug}.sql"
 
-[[version_series]]
+[[migration_series]]
 name = "stg"
 directory = "데이터베이스/STG/DDL"
-pattern = "V1_{N}__*.sql"
+file_pattern = "V1_{number}__{slug}.sql"

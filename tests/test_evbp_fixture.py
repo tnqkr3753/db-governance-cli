@@ -2,8 +2,7 @@
 
 from pathlib import Path
 from db_governance.ddl_manage import get_next_migration_version
-from db_governance.generate_ddl import generate_postgres_ddl_delta
-from db_governance.render import ColumnSpec, TableSpec, parse_markdown_table_spec
+from db_governance.render import parse_markdown_table_spec
 
 
 def test_evbp_korean_markdown_table_parser():
@@ -46,23 +45,6 @@ def test_evbp_korean_markdown_table_parser():
     assert cols["NAME"].is_pk is False
 
 
-def test_composite_pk_ddl_generation():
-    table = TableSpec(
-        name="POR_COMMON_CODE",
-        columns=[
-            ColumnSpec(name="type", data_type="VARCHAR(30)", is_pk=True),
-            ColumnSpec(name="code", data_type="VARCHAR(30)", is_pk=True),
-            ColumnSpec(name="name", data_type="VARCHAR(30)", is_pk=False),
-        ],
-    )
-
-    sql = generate_postgres_ddl_delta(table, base_spec=None)
-    assert "type VARCHAR(30) NOT NULL" in sql
-    assert "code VARCHAR(30) NOT NULL" in sql
-    assert "PRIMARY KEY (type, code)" in sql
-    assert "type VARCHAR(30) PRIMARY KEY" not in sql
-
-
 def test_evbp_version_series_resolution(tmp_path: Path):
     from db_governance.config import load_profile
 
@@ -77,14 +59,14 @@ def test_evbp_version_series_resolution(tmp_path: Path):
 name = "evbp"
 artifact_groups = []
 rules = []
-[[version_series]]
+[[migration_series]]
 name = "main"
 directory = "데이터베이스/DDL"
-pattern = "V1_{N}__*.sql"
-[[version_series]]
+file_pattern = "V1_{number}__{slug}.sql"
+[[migration_series]]
 name = "stg"
 directory = "데이터베이스/STG/DDL"
-pattern = "V1_{N}__*.sql"
+file_pattern = "V1_{number}__{slug}.sql"
 """)
 
     _, prof, _ = load_profile(proj)
